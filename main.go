@@ -38,8 +38,8 @@ func getNowIP() string {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
 		return "127.0.0.1"
-	}
-	defer conn.Close()
+}
+defer conn.Close()
 	Now := conn.LocalAddr().(*net.UDPAddr)
 	return Now.IP.String()
 }
