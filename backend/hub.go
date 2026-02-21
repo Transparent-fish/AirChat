@@ -1,13 +1,5 @@
 package main
 
-// 1. Message 形式
-type Message struct {
-	Sender  string `json:"sender"`  // 发送者
-	Content string `json:"content"` // 内容
-	Time    string `json:"time"`    // 时间
-	Type    string `json:"type"`    // 消息类型
-}
-
 // 2. 喵喵喵
 type Hub struct {
 	clients    map[*Client]bool
