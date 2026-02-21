@@ -19,7 +19,7 @@ import {
   Ban,
   Lock
 } from 'lucide-vue-next'
-import { authApi, fileApi, adminApi } from './api'
+import { authApi, adminApi } from './api'
 import { watch } from 'vue'
 import Markdown from './components/Markdown.vue'
 
@@ -109,6 +109,17 @@ const toggleRole = async (user: any) => {
     await fetchAdminUsers()
   } catch (e) {
     alert('分配失败: ' + (e as any).response?.data?.error)
+  }
+}
+
+const handleDeleteUser = async (user: any) => {
+  if (!confirm(`确定要彻底删除用户 ${user.username} 吗？此操作不可撤销。`)) return
+  if (!canManage(user)) return
+  try {
+    await adminApi.deleteUser(user.username)
+    await fetchAdminUsers()
+  } catch (e) {
+    alert('删除失败: ' + (e as any).response?.data?.error)
   }
 }
 
@@ -343,50 +354,11 @@ const sendMessage = () => {
   inputMsg.value = ''
 }
 
-const fetchFiles = async () => {
-  try {
-    const res = await fetch(`http://${window.location.hostname}:8080/api/files`)
-    files.value = await res.json()
-  } catch (e) {
-    console.error('获取文件失败', e)
-  }
-}
-
-const onAvatarChange = async (e: Event) => {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  
-  const formData = new FormData()
-  formData.append('avatar', file)
-  
-  try {
-    const res = await authApi.uploadAvatar(formData)
-    const newAvatar = res.data.url
-    currentUser.value.avatar = newAvatar
-    localStorage.setItem('airchat_avatar', newAvatar)
-  } catch (err) {
-    alert('头像上传失败')
-  }
-}
-
 onMounted(() => {
   if (isLogined.value) {
     connectWS()
   }
-  fetchFiles()
 })
-
-const formatSize = (bytes: number) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
-
-const downloadFile = (filename: string) => {
-  window.open(`http://${window.location.hostname}:8080/shared/${filename}`)
-}
 </script>
 
 <template>
@@ -519,13 +491,14 @@ const downloadFile = (filename: string) => {
                     <th class="px-4 py-3 font-bold">角色</th>
                     <th class="px-4 py-3 font-bold text-center">禁言</th>
                     <th class="px-4 py-3 font-bold text-center">封号</th>
+                    <th class="px-4 py-3 font-bold text-center">账号管理</th>
                     <th v-if="currentUser.role === 'system'" class="px-4 py-3 font-bold text-center">系统权</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-white/40">
                   <tr v-for="user in adminUsers" :key="user.id" class="hover:bg-white/30 transition-colors">
                     <td class="px-4 py-2">
-                      <img :src="getAvatarUrl(user.avatar)" class="w-8 h-8 rounded-full border border-white shadow-sm" />
+                      <img :src="getAvatarUrl(user.avatar || '')" class="w-8 h-8 rounded-full border border-white shadow-sm" />
                     </td>
                     <td class="px-4 py-2 font-medium break-words text-slate-700">{{ user.username }}</td>
                     <td class="px-4 py-2">
@@ -546,9 +519,15 @@ const downloadFile = (filename: string) => {
                       </button>
                       <span v-else class="text-slate-300 text-xs">-</span>
                     </td>
+                    <td class="px-4 py-2 text-center">
+                      <button v-if="canManage(user)" @click="handleDeleteUser(user)" class="bg-slate-100 hover:bg-red-100 text-slate-500 hover:text-red-600 p-2 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center">
+                        <Trash2 :size="14" />
+                      </button>
+                      <span v-else class="text-slate-300 text-xs">-</span>
+                    </td>
                     <td v-if="currentUser.role === 'system'" class="px-4 py-2 text-center">
                       <button v-if="user.role !== 'system'" @click="toggleRole(user)" :class="user.role === 'admin' ? 'bg-orange-400 hover:bg-orange-500' : 'bg-indigo-500 hover:bg-indigo-600'" class="text-white px-3 py-1 rounded-lg font-bold text-xs shadow-sm transition-colors cursor-pointer">
-                        {{ user.role === 'admin' ? '降权为User' : '设为Admin' }}
+                        {{ user.role === 'admin' ? '降权' : '升权' }}
                       </button>
                       <span v-else class="text-slate-300 text-xs text-purple-500 font-bold tracking-widest uppercase">System</span>
                     </td>

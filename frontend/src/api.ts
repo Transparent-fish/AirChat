@@ -39,7 +39,8 @@ export const adminApi = {
     banIP: (data: { ip: string, action: 'ban' | 'unban' }) => api.post('/admin/ban_ip', data),
     changePassword: (data: { new_password: string }) => api.post('/admin/password', data),
     setRole: (data: { username: string, role: string }) => api.post('/admin/set_role', data),
-    changeSystemPassword: (data: { new_password: string }) => api.post('/admin/system_password', data)
+    changeSystemPassword: (data: { new_password: string }) => api.post('/admin/system_password', data),
+    deleteUser: (username: string) => api.delete(`/admin/users/${username}`)
 }
 
 export default api

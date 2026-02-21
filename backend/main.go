@@ -467,12 +467,38 @@ func main() {
 		}
 
 		if req.Action == "ban" {
-			isRange := strings.Contains(req.IP, "/")
+			isRange := strings.Contains(req.IP, "/") || strings.Contains(req.IP, "-")
 			db.Save(&IPBan{IP: req.IP, IsRange: isRange})
 		} else {
 			db.Where("ip = ?", req.IP).Delete(&IPBan{})
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "操作成功"})
+	})
+
+	// 删除用户 (针对 User 或 Admin)
+	adminGroup.DELETE("/users/:username", func(c *gin.Context) {
+		targetUsername := c.Param("username")
+		callerRole := c.MustGet("role").(string)
+
+		var target User
+		if err := db.Where("username = ?", targetUsername).First(&target).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+			return
+		}
+
+		// 权限判别
+		if callerRole == "admin" && target.Role != "user" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "普通管理员仅能删除普通用户"})
+			return
+		}
+		if target.Role == "system" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "无法删除系统最高权限者"})
+			return
+		}
+
+		// 执行删除
+		db.Delete(&target)
+		c.JSON(http.StatusOK, gin.H{"message": "用户删除成功"})
 	})
 
 	// 修改管理员密码
