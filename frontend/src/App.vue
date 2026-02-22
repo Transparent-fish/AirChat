@@ -36,8 +36,10 @@ interface Message {
 
 interface SharedFile {
   name: string
+  dirKey?: string
   size: number
   isDir: boolean
+  owner?: string
 }
 
 // --- 状态管理 ---
@@ -382,15 +384,21 @@ const onAvatarChange = async (e: Event) => {
 // --- 文件共享区 ---
 const fetchFiles = async () => {
   try {
-    const res = await fileApi.getMyFolders()
-    files.value = (res.data || []).map((name: string) => ({ name, size: 0, isDir: true }))
+    const res = await fileApi.getSharedFolders()
+    files.value = (res.data || []).map((item: any) => ({
+      name: item.name,
+      dirKey: item.dirKey,
+      size: item.size || 0,
+      isDir: item.is_dir ?? true,
+      owner: item.owner || ''
+    }))
   } catch (e) {
-    console.error('获取文件列表失败', e)
+    console.error('获取共享文件列表失败', e)
   }
 }
 
-const downloadFile = (name: string) => {
-  window.open(`http://${window.location.hostname}:8080/api/files/${encodeURIComponent(name)}`, '_blank')
+const downloadFile = (dirKey: string) => {
+  window.open(`http://${window.location.hostname}:8080/shared/${encodeURIComponent(dirKey)}`, '_blank')
 }
 
 const formatSize = (size: number) => {

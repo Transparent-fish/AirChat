@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -350,7 +351,123 @@ func main() {
 		})
 	})
 
-	// 分享文件夹路由
+	// ====== 文件共享路由 ======
+	os.MkdirAll("./shared", os.ModePerm)
+	r.Static("/shared", "./shared")
+
+	// 上传文件夹（需登录）
+	r.POST("/api/upload-folder", authMiddleware, func(c *gin.Context) {
+		username := c.MustGet("username").(string)
+		folderName := c.PostForm("folderName")
+		if folderName == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "文件夹名不能为空"})
+			return
+		}
+		// 清理文件夹名防止路径穿越
+		folderName = strings.ReplaceAll(folderName, "..", "")
+		folderName = strings.Trim(folderName, "/\\")
+		destDir := fmt.Sprintf("./shared/%s_%s", username, folderName)
+		os.MkdirAll(destDir, os.ModePerm)
+
+		form, err := c.MultipartForm()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无法解析表单"})
+			return
+		}
+		files := form.File["files"]
+		paths := form.Value["paths"]
+		for i, file := range files {
+			relPath := ""
+			if i < len(paths) {
+				relPath = paths[i]
+			} else {
+				relPath = file.Filename
+			}
+			// 只保留相对路径部分（去掉顶层文件夹）
+			parts := strings.SplitN(relPath, "/", 2)
+			if len(parts) == 2 {
+				relPath = parts[1]
+			} else {
+				relPath = file.Filename
+			}
+			destPath := destDir + "/" + relPath
+			os.MkdirAll(filepath.Dir(destPath), os.ModePerm)
+			c.SaveUploadedFile(file, destPath)
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "上传成功"})
+	})
+
+	// 获取当前用户分享的文件夹列表（需登录）
+	r.GET("/api/my-folders", authMiddleware, func(c *gin.Context) {
+		username := c.MustGet("username").(string)
+		prefix := username + "_"
+		entries, err := os.ReadDir("./shared")
+		if err != nil {
+			c.JSON(http.StatusOK, []string{})
+			return
+		}
+		var folders []string
+		for _, e := range entries {
+			if e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
+				// 返回去掉用户名前缀的原始文件夹名
+				folders = append(folders, strings.TrimPrefix(e.Name(), prefix))
+			}
+		}
+		c.JSON(http.StatusOK, folders)
+	})
+
+	// 获取所有用户共享的文件夹（公共，需登录）
+	r.GET("/api/shared-folders", authMiddleware, func(c *gin.Context) {
+		entries, err := os.ReadDir("./shared")
+		if err != nil {
+			c.JSON(http.StatusOK, []gin.H{})
+			return
+		}
+		var result []gin.H
+		for _, e := range entries {
+			if e.IsDir() {
+				info, _ := e.Info()
+				// 文件夹名格式为 username_folderName，分割显示
+				parts := strings.SplitN(e.Name(), "_", 2)
+				displayName := e.Name()
+				owner := ""
+				if len(parts) == 2 {
+					owner = parts[0]
+					displayName = parts[1]
+				}
+				size := int64(0)
+				if info != nil {
+					size = info.Size()
+				}
+				result = append(result, gin.H{
+					"name":   displayName,
+					"dirKey": e.Name(),
+					"owner":  owner,
+					"size":   size,
+					"is_dir": true,
+				})
+			}
+		}
+		if result == nil {
+			result = []gin.H{}
+		}
+		c.JSON(http.StatusOK, result)
+	})
+
+	// 删除分享文件夹（需登录，只能删除自己的）
+	r.DELETE("/api/delete-folder/:name", authMiddleware, func(c *gin.Context) {
+		username := c.MustGet("username").(string)
+		folderName := c.Param("name")
+		folderName = strings.ReplaceAll(folderName, "..", "")
+		folderName = strings.Trim(folderName, "/\\")
+		targetDir := fmt.Sprintf("./shared/%s_%s", username, folderName)
+		if err := os.RemoveAll(targetDir); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+	})
+
 	// 嵌入的前端静态资源
 	subFS, _ := fs.Sub(frontendStatic, "dist")
 	r.NoRoute(func(c *gin.Context) {
