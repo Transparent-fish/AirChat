@@ -34,6 +34,7 @@
 1. 进入前端目录并构建：`npm run build`
 2. 进入后端目录并执行：`go build -o AirChat.exe`
 3. 运行 `AirChat.exe` 即可。
+注意：再您进入前端目录编译完成后，请将编译产物 dist 文件夹复制一份到后端文件夹，再执行 `go build -o AirChat.exe`
 或者去 releases 里面下载
 
 ## 🎮 指令使用

@@ -418,36 +418,54 @@ func main() {
 
 	// 获取所有用户共享的文件夹（公共，需登录）
 	r.GET("/api/shared-folders", authMiddleware, func(c *gin.Context) {
-		entries, err := os.ReadDir("./shared")
+		subPath := c.Query("path")
+		// 清理路径防止穿越
+		subPath = strings.ReplaceAll(subPath, "..", "")
+		subPath = strings.Trim(subPath, "/\\")
+
+		baseDir := "./shared"
+		targetDir := baseDir
+		if subPath != "" {
+			targetDir = filepath.Join(baseDir, subPath)
+		}
+
+		entries, err := os.ReadDir(targetDir)
 		if err != nil {
 			c.JSON(http.StatusOK, []gin.H{})
 			return
 		}
+
 		var result []gin.H
 		for _, e := range entries {
-			if e.IsDir() {
-				info, _ := e.Info()
-				// 文件夹名格式为 username_folderName，分割显示
-				parts := strings.SplitN(e.Name(), "_", 2)
-				displayName := e.Name()
-				owner := ""
-				if len(parts) == 2 {
-					owner = parts[0]
-					displayName = parts[1]
-				}
-				size := int64(0)
-				if info != nil {
-					size = info.Size()
-				}
-				result = append(result, gin.H{
-					"name":   displayName,
-					"dirKey": e.Name(),
-					"owner":  owner,
-					"size":   size,
-					"is_dir": true,
-				})
+			info, _ := e.Info()
+			fullRelPath := e.Name()
+			if subPath != "" {
+				fullRelPath = subPath + "/" + e.Name()
 			}
+
+			item := gin.H{
+				"name":   e.Name(),
+				"path":   fullRelPath,
+				"is_dir": e.IsDir(),
+				"size":   int64(0),
+			}
+
+			if info != nil {
+				item["size"] = info.Size()
+			}
+
+			// 如果是在顶层目录，尝试解析 owner
+			if subPath == "" {
+				parts := strings.SplitN(e.Name(), "_", 2)
+				if len(parts) == 2 {
+					item["owner"] = parts[0]
+					item["name"] = parts[1]
+				}
+			}
+
+			result = append(result, item)
 		}
+
 		if result == nil {
 			result = []gin.H{}
 		}
