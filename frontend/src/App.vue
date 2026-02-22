@@ -49,6 +49,7 @@ const socket = ref<WebSocket | null>(null)
 const chatContainer = ref<HTMLElement | null>(null)
 const activeTab = ref<'chat' | 'files'>('chat')
 const files = ref<SharedFile[]>([])
+const currentPath = ref('')
 
 const showShareUI = ref(false)
 const mySharedFolders = ref<string[]>([])
@@ -343,6 +344,7 @@ const sendMessage = () => {
   }
 
   if (inputMsg.value.trim() === '/share') {
+    activeTab.value = 'files'
     showShareUI.value = true
     inputMsg.value = ''
     return
@@ -384,21 +386,44 @@ const onAvatarChange = async (e: Event) => {
 // --- 文件共享区 ---
 const fetchFiles = async () => {
   try {
-    const res = await fileApi.getSharedFolders()
+    const res = await fileApi.getSharedFolders(currentPath.value)
     files.value = (res.data || []).map((item: any) => ({
       name: item.name,
-      dirKey: item.dirKey,
+      dirKey: item.path, // 这里使用完整相对路径作为标识
       size: item.size || 0,
-      isDir: item.is_dir ?? true,
+      isDir: item.is_dir,
       owner: item.owner || ''
-    }))
+    })).sort((a: any, b: any) => {
+      // 文件夹优先
+      if (a.isDir && !b.isDir) return -1
+      if (!a.isDir && b.isDir) return 1
+      // 同类型按名称排序
+      return a.name.localeCompare(b.name)
+    })
   } catch (e) {
     console.error('获取共享文件列表失败', e)
   }
 }
 
-const downloadFile = (dirKey: string) => {
-  window.open(`http://${window.location.hostname}:8080/shared/${encodeURIComponent(dirKey)}`, '_blank')
+const handleFileClick = (file: SharedFile) => {
+  if (file.isDir) {
+    currentPath.value = file.dirKey || ''
+    fetchFiles()
+  } else {
+    downloadFile(file.dirKey || file.name)
+  }
+}
+
+const goBack = () => {
+  if (!currentPath.value) return
+  const parts = currentPath.value.split('/')
+  parts.pop()
+  currentPath.value = parts.join('/')
+  fetchFiles()
+}
+
+const downloadFile = (path: string) => {
+  window.open(`http://${window.location.hostname}:8080/shared/${encodeURIComponent(path)}`, '_blank')
 }
 
 const formatSize = (size: number) => {
@@ -679,6 +704,15 @@ const formatSize = (size: number) => {
             <MessageSquare :size="18" />
             公共频道
           </button>
+
+          <button 
+            @click="activeTab = 'files'"
+            :class="activeTab === 'files' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-600 hover:bg-white/50'"
+            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 font-medium group"
+          >
+            <FolderOpen :size="18" />
+            资源共享库
+          </button>
           
           <button 
             v-if="currentUser.role === 'admin' || currentUser.role === 'system'"
@@ -821,9 +855,14 @@ const formatSize = (size: number) => {
                 <p class="text-[10px] text-slate-500 font-medium uppercase tracking-widest">Local Network Storage</p>
               </div>
             </div>
-            <button @click="fetchFiles" class="bg-white/50 backdrop-blur-sm border border-white px-4 py-2 rounded-xl text-slate-600 font-bold text-xs hover:bg-white transition-all shadow-sm flex items-center gap-2">
-              <Plus :size="14" class="rotate-45" /> 刷新
-            </button>
+            <div class="flex items-center gap-4">
+              <button v-if="currentPath" @click="goBack" class="bg-white/50 backdrop-blur-sm border border-white px-3 py-2 rounded-xl text-slate-600 font-bold text-xs hover:bg-white transition-all shadow-sm flex items-center gap-2">
+                返回上一级
+              </button>
+              <button @click="fetchFiles" class="bg-white/50 backdrop-blur-sm border border-white px-4 py-2 rounded-xl text-slate-600 font-bold text-xs hover:bg-white transition-all shadow-sm flex items-center gap-2">
+                <Plus :size="14" class="rotate-45" /> 刷新
+              </button>
+            </div>
           </header>
 
           <div class="flex-1 overflow-y-auto p-8 z-10">
@@ -838,23 +877,34 @@ const formatSize = (size: number) => {
                 v-for="file in files" :key="file.name"
                 class="p-6 rounded-[2rem] bg-white/60 backdrop-blur-md border border-white/50 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 group relative overflow-hidden"
               >
-                <div class="absolute inset-x-0 bottom-0 h-1 bg-blue-600/0 group-hover:bg-blue-600/100 transition-all duration-700"></div>
+                <div class="absolute inset-x-0 bottom-0 h-1 transition-all duration-700" :class="file.isDir ? 'bg-blue-600/0 group-hover:bg-blue-600/100' : 'bg-emerald-500/0 group-hover:bg-emerald-500/100'"></div>
                 
                 <div class="flex items-start justify-between mb-6">
-                  <div class="bg-blue-600 p-4 rounded-2xl text-white shadow-lg shadow-blue-200 group-hover:scale-110 transition-transform">
+                  <div 
+                    @click="handleFileClick(file)"
+                    :class="file.isDir ? 'bg-blue-600 shadow-blue-200' : 'bg-emerald-500 shadow-emerald-200'"
+                    class="p-4 rounded-2xl text-white shadow-lg group-hover:scale-110 transition-transform cursor-pointer"
+                  >
                     <FolderOpen v-if="file.isDir" :size="20" />
-                    <Terminal v-else :size="20" />
+                    <Download v-else :size="20" />
                   </div>
                   <button 
                     v-if="!file.isDir"
-                    @click="downloadFile(file.name)"
-                    class="p-2.5 bg-white text-slate-400 hover:text-blue-600 rounded-xl transition-all shadow-sm border border-slate-100"
+                    @click="downloadFile(file.dirKey || file.name)"
+                    class="p-2.5 bg-white text-slate-400 hover:text-emerald-600 rounded-xl transition-all shadow-sm border border-slate-100"
                   >
                     <Download :size="16" />
                   </button>
                 </div>
 
-                <h3 class="font-black text-slate-800 truncate mb-1 text-sm tracking-tight" :title="file.name">{{ file.name }}</h3>
+                <h3 
+                  @click="handleFileClick(file)"
+                  class="font-black text-slate-800 truncate mb-1 text-sm tracking-tight cursor-pointer transition-colors"
+                  :class="file.isDir ? 'hover:text-blue-600' : 'hover:text-emerald-500'" 
+                  :title="file.name"
+                >
+                  {{ file.name }}
+                </h3>
                 <div class="flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
                   <span>{{ file.isDir ? '目录' : '文件' }}</span>
                   <span class="bg-slate-100 px-2 py-0.5 rounded-full">{{ formatSize(file.size) }}</span>
