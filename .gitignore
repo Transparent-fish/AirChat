@@ -1,3 +1,14 @@
 !*.idea
 *.exe
 *.exe~
+
+# 构建产物（不纳入版本控制）
+backend/dist/
+frontend/dist/
+
+# 数据库文件
+*.db
+
+# 用户上传内容
+backend/uploads/
+backend/shared/
