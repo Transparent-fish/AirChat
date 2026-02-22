@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
-// @ts-ignore
-import mk from 'markdown-it-katex'
+import mk from '@traptitech/markdown-it-katex'
 import 'katex/dist/katex.min.css'
 
 const props = defineProps<{

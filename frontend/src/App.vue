@@ -19,7 +19,7 @@ import {
   Ban,
   Lock
 } from 'lucide-vue-next'
-import { authApi, adminApi } from './api'
+import { authApi, adminApi, fileApi } from './api'
 import { watch } from 'vue'
 import Markdown from './components/Markdown.vue'
 
@@ -357,8 +357,48 @@ const sendMessage = () => {
 onMounted(() => {
   if (isLogined.value) {
     connectWS()
+    fetchFiles()
   }
 })
+
+// --- 头像更改 ---
+const onAvatarChange = async (e: Event) => {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append('avatar', file)
+  try {
+    const res = await authApi.uploadAvatar(formData)
+    const newUrl = res.data.url as string
+    currentUser.value.avatar = newUrl
+    localStorage.setItem('airchat_avatar', newUrl)
+  } catch (err) {
+    alert('头像上传失败')
+  } finally {
+    ;(e.target as HTMLInputElement).value = ''
+  }
+}
+
+// --- 文件共享区 ---
+const fetchFiles = async () => {
+  try {
+    const res = await fileApi.getMyFolders()
+    files.value = (res.data || []).map((name: string) => ({ name, size: 0, isDir: true }))
+  } catch (e) {
+    console.error('获取文件列表失败', e)
+  }
+}
+
+const downloadFile = (name: string) => {
+  window.open(`http://${window.location.hostname}:8080/api/files/${encodeURIComponent(name)}`, '_blank')
+}
+
+const formatSize = (size: number) => {
+  if (!size) return '-'
+  if (size < 1024) return size + ' B'
+  if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB'
+  return (size / (1024 * 1024)).toFixed(1) + ' MB'
+}
 </script>
 
 <template>
