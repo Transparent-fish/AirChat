@@ -23,6 +23,7 @@ import (
 	"gorm.io/gorm"
 )
 
+//go:embed dist
 var frontendStatic embed.FS
 
 var db *gorm.DB
