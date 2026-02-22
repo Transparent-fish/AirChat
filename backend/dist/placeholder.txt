@@ -1,1 +1,0 @@
-This is a placeholder for the frontend build. Run 'npm run build' in the frontend directory to update this.

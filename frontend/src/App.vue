@@ -19,7 +19,7 @@ import {
   Ban,
   Lock
 } from 'lucide-vue-next'
-import { authApi, adminApi } from './api'
+import { authApi, adminApi, fileApi } from './api'
 import { watch } from 'vue'
 import Markdown from './components/Markdown.vue'
 
@@ -36,8 +36,10 @@ interface Message {
 
 interface SharedFile {
   name: string
+  dirKey?: string
   size: number
   isDir: boolean
+  owner?: string
 }
 
 // --- 状态管理 ---
@@ -357,8 +359,54 @@ const sendMessage = () => {
 onMounted(() => {
   if (isLogined.value) {
     connectWS()
+    fetchFiles()
   }
 })
+
+// --- 头像更改 ---
+const onAvatarChange = async (e: Event) => {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append('avatar', file)
+  try {
+    const res = await authApi.uploadAvatar(formData)
+    const newUrl = res.data.url as string
+    currentUser.value.avatar = newUrl
+    localStorage.setItem('airchat_avatar', newUrl)
+  } catch (err) {
+    alert('头像上传失败')
+  } finally {
+    ;(e.target as HTMLInputElement).value = ''
+  }
+}
+
+// --- 文件共享区 ---
+const fetchFiles = async () => {
+  try {
+    const res = await fileApi.getSharedFolders()
+    files.value = (res.data || []).map((item: any) => ({
+      name: item.name,
+      dirKey: item.dirKey,
+      size: item.size || 0,
+      isDir: item.is_dir ?? true,
+      owner: item.owner || ''
+    }))
+  } catch (e) {
+    console.error('获取共享文件列表失败', e)
+  }
+}
+
+const downloadFile = (dirKey: string) => {
+  window.open(`http://${window.location.hostname}:8080/shared/${encodeURIComponent(dirKey)}`, '_blank')
+}
+
+const formatSize = (size: number) => {
+  if (!size) return '-'
+  if (size < 1024) return size + ' B'
+  if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB'
+  return (size / (1024 * 1024)).toFixed(1) + ' MB'
+}
 </script>
 
 <template>

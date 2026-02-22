@@ -28,6 +28,7 @@ export const fileApi = {
         headers: { 'Content-Type': 'multipart/form-data' }
     }),
     getMyFolders: () => api.get('/my-folders'),
+    getSharedFolders: () => api.get('/shared-folders'),
     deleteFolder: (folderName: string) => api.delete(`/delete-folder/${encodeURIComponent(folderName)}`)
 }
 
