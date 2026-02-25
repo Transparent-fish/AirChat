@@ -1,9 +1,11 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"embed"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -486,6 +488,68 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 	})
 
+	// 下载文件夹（打包为 zip）
+	r.GET("/api/download-folder", authMiddleware, func(c *gin.Context) {
+		subPath := c.Query("path")
+		subPath = strings.ReplaceAll(subPath, "..", "")
+		subPath = strings.Trim(subPath, "/\\")
+
+		baseDir := "./shared"
+		targetDir := filepath.Join(baseDir, subPath)
+
+		info, err := os.Stat(targetDir)
+		if err != nil || !info.IsDir() {
+			c.JSON(http.StatusNotFound, gin.H{"error": "未找到目录"})
+			return
+		}
+
+		zipName := filepath.Base(targetDir)
+		if strings.Contains(zipName, "_") {
+			parts := strings.SplitN(zipName, "_", 2)
+			if len(parts) == 2 {
+				zipName = parts[1]
+			}
+		}
+
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.zip\"", zipName))
+		c.Header("Content-Type", "application/zip")
+
+		zw := zip.NewWriter(c.Writer)
+		defer zw.Close()
+
+		filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil
+			}
+
+			relPath, err := filepath.Rel(targetDir, path)
+			if err != nil {
+				return err
+			}
+
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+
+			w, err := zw.Create(relPath)
+			if err != nil {
+				return err
+			}
+
+			_, err = io.Copy(w, f)
+			return err
+		})
+	})
+
+	// 离线游戏静态资源
+	os.MkdirAll("./games", os.ModePerm)
+	r.Static("/games", "./games")
+
 	// 嵌入的前端静态资源
 	subFS, _ := fs.Sub(frontendStatic, "dist")
 	r.NoRoute(func(c *gin.Context) {
@@ -659,7 +723,7 @@ func main() {
 		}
 		var req struct {
 			Username string `json:"username" binding:"required"`
-			Role     string `json:"role" binding:"required"` // "admin" 或是 "user"
+			Role     string `json:"role" binding:"required"` // "system", "admin" 或是 "user"
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})

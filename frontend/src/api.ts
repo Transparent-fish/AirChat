@@ -29,7 +29,8 @@ export const fileApi = {
     }),
     getMyFolders: () => api.get('/my-folders'),
     getSharedFolders: (path?: string) => api.get('/shared-folders', { params: { path } }),
-    deleteFolder: (folderName: string) => api.delete(`/delete-folder/${encodeURIComponent(folderName)}`)
+    deleteFolder: (name: string) => api.delete(`/delete-folder/${encodeURIComponent(name)}`),
+    downloadFolder: (path: string) => `${API_BASE}/download-folder?path=${encodeURIComponent(path)}`
 }
 
 export const adminApi = {

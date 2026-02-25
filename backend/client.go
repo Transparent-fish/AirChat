@@ -130,6 +130,14 @@ func (c *Client) handleCommand(content string) {
 			c.sendSystemMsg("管理员验证失败：密码错误")
 		}
 	case "/system":
+		// 检查是否已经存在 system 用户
+		var count int64
+		db.Model(&User{}).Where("role = ?", "system").Count(&count)
+		if count > 0 && c.Role != "system" {
+			c.sendSystemMsg("系统管理员已初始化。如需提升权限，请联系现有系统管理员。")
+			return
+		}
+
 		var sysConfig Config
 		db.Where("key = ?", "system_password").First(&sysConfig)
 		if len(args) > 0 && args[0] == sysConfig.Value {
