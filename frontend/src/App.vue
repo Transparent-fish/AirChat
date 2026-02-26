@@ -17,7 +17,9 @@ import {
   Settings,
   ShieldAlert,
   Ban,
-  Lock
+  Lock,
+  Gamepad2,
+  Maximize2
 } from 'lucide-vue-next'
 import { authApi, adminApi, fileApi } from './api'
 import { watch } from 'vue'
@@ -47,9 +49,10 @@ const messages = ref<Message[]>([])
 const inputMsg = ref('')
 const socket = ref<WebSocket | null>(null)
 const chatContainer = ref<HTMLElement | null>(null)
-const activeTab = ref<'chat' | 'files'>('chat')
+const activeTab = ref<'chat' | 'files' | 'games'>('chat')
 const files = ref<SharedFile[]>([])
 const currentPath = ref('')
+const currentGame = ref<string | null>(null)
 
 const showShareUI = ref(false)
 const mySharedFolders = ref<string[]>([])
@@ -432,6 +435,35 @@ const formatSize = (size: number) => {
   if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB'
   return (size / (1024 * 1024)).toFixed(1) + ' MB'
 }
+
+const downloadFolder = (path: string) => {
+  window.open(fileApi.downloadFolder(path), '_blank')
+}
+
+const gamesList = [
+  {
+    id: 'oitrainer',
+    name: 'OI重开模拟器',
+    desc: '模拟信息学竞赛选手的成长历程，经历赛季训练与正式比赛的抉择。',
+    path: '/games/OI重开模拟器/index.html'
+  },
+  {
+    id: 'recallbj8z',
+    name: '文化课重开模拟器',
+    desc: 'Recall March 7th - 一个基于 OI 文化的策略或重开模拟游戏。',
+    path: '/games/文化课重开模拟器.html'
+  },
+  {
+    id: 'oj-simulator',
+    name: 'OJ 维护模拟器',
+    desc: '模拟如何运行和维护一个 OnlineJudge 系统。',
+    path: '/games/OJ 模拟器.html'
+  }
+]
+
+const selectGame = (game: any) => {
+  currentGame.value = `http://${window.location.hostname}:8080${game.path}`
+}
 </script>
 
 <template>
@@ -442,7 +474,7 @@ const formatSize = (size: number) => {
         <div class="inline-flex p-4 bg-blue-600 rounded-2xl text-white mb-4 shadow-lg shadow-blue-200">
           <MessageSquare :size="32" />
         </div>
-        <h2 class="text-3xl font-bold text-slate-800">AirChat</h2>
+        <h2 class="text-3xl font-bold text-slate-800">蒙青创OJ</h2>
         <p class="text-slate-500 mt-2">{{ authMode === 'login' ? '欢迎回来' : '开启新的对话' }}</p>
       </div>
 
@@ -692,7 +724,7 @@ const formatSize = (size: number) => {
           <div class="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-200">
             <MessageSquare :size="20" />
           </div>
-          <h1 class="text-xl font-bold tracking-tight text-slate-800">AirChat</h1>
+          <h1 class="text-xl font-bold tracking-tight text-slate-800">蒙青创OJ</h1>
         </div>
 
         <nav class="space-y-2">
@@ -712,6 +744,15 @@ const formatSize = (size: number) => {
           >
             <FolderOpen :size="18" />
             资源共享库
+          </button>
+
+          <button 
+            @click="activeTab = 'games'; currentGame = null"
+            :class="activeTab === 'games' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-600 hover:bg-white/50'"
+            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 font-medium group"
+          >
+            <Gamepad2 :size="18" />
+            游戏中心
           </button>
           
           <button 
@@ -803,20 +844,14 @@ const formatSize = (size: number) => {
                     </div>
                   </div>
 
-                  <!-- 气泡内容 -->
-                  <div class="flex flex-col max-w-[75%]" :class="msg.sender_name === currentUser.name ? 'items-end' : 'items-start'">
-                    <div class="flex items-center gap-2 mb-1 px-1">
-                      <span v-if="msg.role === 'system'" class="px-1.5 py-0.5 rounded-md bg-purple-500 text-white text-[8px] font-black uppercase tracking-widest shadow-sm">System</span>
-                      <span v-else-if="msg.role === 'admin'" class="px-1.5 py-0.5 rounded-md bg-amber-400 text-white text-[8px] font-black uppercase tracking-widest shadow-sm">Admin</span>
-                      <span class="text-xs font-bold text-slate-700">{{ msg.sender_name }}</span>
-                      <span class="text-[9px] text-slate-400 font-bold uppercase tracking-tighter">{{ msg.time }}</span>
+                  <div class="flex flex-col gap-1 max-w-[70%]">
+                    <div class="flex items-center gap-2" :class="msg.sender_name === currentUser.name ? 'flex-row-reverse' : ''">
+                      <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{{ msg.sender_name }}</span>
+                      <span class="text-[9px] text-slate-300">{{ msg.time }}</span>
                     </div>
-                    
                     <div 
-                      class="px-5 py-3 rounded-2xl text-[14px] leading-relaxed shadow-lg transition-all border break-words"
-                      :class="msg.sender_name === currentUser.name 
-                        ? 'bg-blue-600 text-white border-blue-500 rounded-tr-none' 
-                        : 'bg-white/80 backdrop-blur-sm text-slate-700 border-white/20 rounded-tl-none'"
+                      class="p-4 rounded-3xl shadow-sm text-sm leading-relaxed"
+                      :class="msg.sender_name === currentUser.name ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-slate-700 rounded-tl-none border border-slate-100'"
                     >
                       <Markdown :content="msg.content || ''" />
                     </div>
@@ -826,18 +861,17 @@ const formatSize = (size: number) => {
             </transition-group>
           </div>
 
-          <footer class="p-6 bg-white/30 backdrop-blur-md border-t border-white/20 z-10">
-            <div class="max-w-4xl mx-auto flex gap-3 p-2 bg-white/70 rounded-2xl border border-white focus-within:ring-4 focus-within:ring-blue-100/50 focus-within:bg-white transition-all duration-500 shadow-xl shadow-slate-200/50">
+          <footer class="p-6 bg-white/30 backdrop-blur-sm border-t border-white/20 relative z-10">
+            <div class="flex gap-3 bg-white/80 p-2 rounded-2xl shadow-inner border border-white/50 focus-within:ring-2 ring-blue-100 transition-all">
               <input 
                 v-model="inputMsg"
                 @keyup.enter="sendMessage"
-                type="text" 
-                placeholder="发送消息 (支持 Markdown 和 LaTeX)..."
-                class="flex-1 bg-transparent px-4 py-2 text-sm focus:outline-none placeholder-slate-400 font-medium"
+                placeholder="键入内容并按回车发送... (输入 /clear 清屏, /share 管理分享)"
+                class="flex-1 bg-transparent border-none outline-none px-4 py-2 text-slate-700 font-medium"
               />
               <button 
                 @click="sendMessage"
-                class="bg-blue-600 text-white p-2.5 rounded-xl hover:bg-blue-700 active:scale-95 transition-all shadow-lg shadow-blue-200/50 flex items-center justify-center"
+                class="bg-blue-600 text-white p-3 rounded-xl shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-90 transition-all"
               >
                 <Send :size="18" />
               </button>
@@ -845,54 +879,50 @@ const formatSize = (size: number) => {
           </footer>
         </template>
 
-        <!-- 文件浏览器页 -->
-        <template v-else>
-          <header class="h-20 flex items-center justify-between px-8 border-b border-white/20 bg-white/30 backdrop-blur-sm z-10">
-            <div class="flex items-center gap-3">
-              <FolderOpen class="text-blue-600" :size="24" />
+        <!-- 资源共享页 -->
+        <template v-else-if="activeTab === 'files'">
+          <header class="h-20 flex items-center justify-between px-8 border-b border-white/20 bg-white/30 backdrop-blur-sm relative z-10">
+            <div class="flex items-center gap-4">
+              <button v-if="currentPath" @click="goBack" class="p-2 hover:bg-white/50 rounded-lg text-slate-500 transition-colors">
+                <X :size="20" />
+              </button>
               <div>
-                <h2 class="font-bold text-slate-800 text-lg">局域网共享资源</h2>
-                <p class="text-[10px] text-slate-500 font-medium uppercase tracking-widest">Local Network Storage</p>
+                <h2 class="font-bold text-slate-800">资源共享库</h2>
+                <div class="flex items-center gap-1">
+                  <span class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">PATH:</span>
+                  <span class="text-[10px] text-blue-600 font-bold tracking-tight">/{{ currentPath }}</span>
+                </div>
               </div>
             </div>
-            <div class="flex items-center gap-4">
-              <button v-if="currentPath" @click="goBack" class="bg-white/50 backdrop-blur-sm border border-white px-3 py-2 rounded-xl text-slate-600 font-bold text-xs hover:bg-white transition-all shadow-sm flex items-center gap-2">
-                返回上一级
-              </button>
-              <button @click="fetchFiles" class="bg-white/50 backdrop-blur-sm border border-white px-4 py-2 rounded-xl text-slate-600 font-bold text-xs hover:bg-white transition-all shadow-sm flex items-center gap-2">
-                <Plus :size="14" class="rotate-45" /> 刷新
-              </button>
-            </div>
+            <button @click="showShareUI = true" class="bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-2">
+              <Plus :size="16" /> 我要分享
+            </button>
           </header>
 
-          <div class="flex-1 overflow-y-auto p-8 z-10">
-            <div v-if="files.length === 0" class="flex flex-col items-center justify-center h-full text-slate-400 py-20 border-4 border-dashed border-white/30 rounded-[3rem] bg-white/10">
-              <FolderOpen :size="64" class="mb-4 opacity-10" />
-              <p class="font-bold">共享文件夹目前为空</p>
-              <p class="text-[10px] mt-1 uppercase tracking-widest opacity-60">Add files to backend/shared directory</p>
+          <div class="flex-1 overflow-y-auto p-6 relative z-10">
+            <div v-if="files.length === 0" class="h-full flex flex-col items-center justify-center text-slate-400 opacity-60">
+              <FolderOpen :size="64" class="mb-4" />
+              <p class="font-bold tracking-widest">当前目录下没有文件</p>
             </div>
-
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <div 
-                v-for="file in files" :key="file.name"
-                class="p-6 rounded-[2rem] bg-white/60 backdrop-blur-md border border-white/50 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 group relative overflow-hidden"
-              >
-                <div class="absolute inset-x-0 bottom-0 h-1 transition-all duration-700" :class="file.isDir ? 'bg-blue-600/0 group-hover:bg-blue-600/100' : 'bg-emerald-500/0 group-hover:bg-emerald-500/100'"></div>
-                
-                <div class="flex items-start justify-between mb-6">
-                  <div 
-                    @click="handleFileClick(file)"
-                    :class="file.isDir ? 'bg-blue-600 shadow-blue-200' : 'bg-emerald-500 shadow-emerald-200'"
-                    class="p-4 rounded-2xl text-white shadow-lg group-hover:scale-110 transition-transform cursor-pointer"
-                  >
-                    <FolderOpen v-if="file.isDir" :size="20" />
-                    <Download v-else :size="20" />
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div v-for="file in files" :key="file.dirKey" 
+                   class="bg-white/60 p-4 rounded-2xl border border-white/50 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all cursor-pointer group relative">
+                <div @click="handleFileClick(file)" class="flex items-start gap-4">
+                  <div class="p-3 rounded-xl" :class="file.isDir ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'">
+                    <FolderOpen v-if="file.isDir" :size="24" />
+                    <Download v-else :size="24" />
                   </div>
-                  <button 
-                    v-if="!file.isDir"
-                    @click="downloadFile(file.dirKey || file.name)"
-                    class="p-2.5 bg-white text-slate-400 hover:text-emerald-600 rounded-xl transition-all shadow-sm border border-slate-100"
-                  >
+                  <div class="flex-1 min-w-0">
+                    <p class="font-bold text-slate-700 truncate mb-0.5">{{ file.name }}</p>
+                    <div class="flex items-center gap-2">
+                      <span class="text-[10px] font-bold text-slate-400">{{ formatSize(file.size) }}</span>
+                      <span v-if="file.owner" class="text-[10px] bg-white/80 px-1.5 py-0.5 rounded-md text-slate-500 font-medium border border-slate-100 italic">BY: {{ file.owner }}</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- 文件夹下载按钮 -->
+                <div v-if="file.isDir" class="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button @click.stop="downloadFolder(file.dirKey || file.name)" class="p-2 bg-white text-blue-600 rounded-lg shadow-sm hover:bg-blue-50 transition-colors" title="打包下载整个文件夹">
                     <Download :size="16" />
                   </button>
                 </div>
@@ -908,6 +938,71 @@ const formatSize = (size: number) => {
                 <div class="flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
                   <span>{{ file.isDir ? '目录' : '文件' }}</span>
                   <span class="bg-slate-100 px-2 py-0.5 rounded-full">{{ formatSize(file.size) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 游戏中心页 -->
+        <template v-else-if="activeTab === 'games'">
+          <header class="h-20 flex items-center justify-between px-8 border-b border-white/20 bg-white/30 backdrop-blur-sm relative z-10">
+            <div class="flex items-center gap-3">
+              <div class="p-2 bg-purple-600 rounded-xl text-white shadow-lg shadow-purple-200">
+                <Gamepad2 :size="20" />
+              </div>
+              <div>
+                <h2 class="font-bold text-slate-800">实验室游戏中心</h2>
+                <p class="text-[10px] text-slate-500 font-medium">OFFLINE GAMES HUB</p>
+              </div>
+            </div>
+            <button v-if="currentGame" @click="currentGame = null" class="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all flex items-center gap-2">
+              返回列表
+            </button>
+          </header>
+
+          <div class="flex-1 overflow-hidden relative z-10 flex flex-col">
+            <!-- 游戏选择列表 -->
+            <div v-if="!currentGame" class="flex-1 overflow-y-auto p-8">
+              <div class="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div v-for="game in gamesList" :key="game.id" 
+                     @click="selectGame(game)"
+                     class="bg-white/60 p-6 rounded-3xl border border-white/50 shadow-xl hover:shadow-2xl hover:scale-[1.03] transition-all cursor-pointer group overflow-hidden relative">
+                  <div class="absolute -top-10 -right-10 w-32 h-32 bg-blue-500/5 rounded-full group-hover:scale-150 transition-transform"></div>
+                  
+                  <div class="relative z-10">
+                    <div class="w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg">
+                      <Gamepad2 :size="28" />
+                    </div>
+                    <h3 class="text-xl font-bold text-slate-800 mb-2 truncate">{{ game.name }}</h3>
+                    <p class="text-sm text-slate-500 leading-relaxed mb-6 h-12 overflow-hidden line-clamp-2">
+                      {{ game.desc }}
+                    </p>
+                    <div class="flex items-center justify-between">
+                      <span class="text-[10px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-3 py-1 rounded-full">Local Offline</span>
+                      <div class="flex items-center gap-2 text-blue-600 font-bold text-sm">
+                        进入游戏
+                        <Send :size="14" class="transform rotate-45" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 游戏 Iframe 容器 -->
+            <div v-else class="flex-1 bg-black relative">
+              <iframe 
+                :src="currentGame" 
+                class="w-full h-full border-none"
+                allow="autoplay; fullscreen"
+              ></iframe>
+              <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 opacity-50 hover:opacity-100 transition-opacity">
+                <button @click="currentGame = null" class="bg-white/20 backdrop-blur-md text-white px-6 py-2 rounded-full font-bold border border-white/30 hover:bg-white/40 transition-all flex items-center gap-2">
+                   退出游戏
+                </button>
+                <div class="bg-black/50 backdrop-blur-md text-white px-4 py-2 rounded-full text-xs flex items-center gap-2">
+                  <Maximize2 :size="12" /> 全屏请使用键盘 F11
                 </div>
               </div>
             </div>

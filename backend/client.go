@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"gorm.io/gorm"
 )
 
 type Client struct {
@@ -130,18 +131,35 @@ func (c *Client) handleCommand(content string) {
 			c.sendSystemMsg("管理员验证失败：密码错误")
 		}
 	case "/system":
-		var sysConfig Config
-		db.Where("key = ?", "system_password").First(&sysConfig)
-		if len(args) > 0 && args[0] == sysConfig.Value {
-			c.Role = "system"
-			db.Model(&User{}).Where("username = ?", c.Username).Update("role", "system")
+		// 使用数据库事务来避免竞态条件
+		err := db.Transaction(func(tx *gorm.DB) error {
+			// 检查是否已经存在 system 用户
+			var count int64
+			tx.Model(&User{}).Where("role = ?", "system").Count(&count)
+			if count > 0 && c.Role != "system" {
+				return fmt.Errorf("系统管理员已初始化。如需提升权限，请联系现有系统管理员。")
+			}
+
+			var sysConfig Config
+			tx.Where("key = ?", "system_password").First(&sysConfig)
+			if len(args) > 0 && args[0] == sysConfig.Value {
+				c.Role = "system"
+				if err := tx.Model(&User{}).Where("username = ?", c.Username).Update("role", "system").Error; err != nil {
+					return err
+				}
+				return nil
+			}
+			return fmt.Errorf("系统权限验证失败：密码错误")
+		})
+
+		if err != nil {
+			c.sendSystemMsg(err.Error())
+		} else {
 			c.sendSystemMsg("超级系统权认证成功！已开启全局管控权限。")
 			c.send <- Message{
 				Type: "role_update",
 				Role: "system",
 			}
-		} else {
-			c.sendSystemMsg("系统权限验证失败：密码错误")
 		}
 	default:
 		c.sendSystemMsg("未知指令: " + cmd)
