@@ -530,19 +530,22 @@ func main() {
 				return err
 			}
 
-			f, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
+			// 通过匿名函数确保文件句柄在使用后立即关闭
+			return func() error {
+				f, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
 
-			w, err := zw.Create(relPath)
-			if err != nil {
-				return err
-			}
+				w, err := zw.Create(relPath)
+				if err != nil {
+					return err
+				}
 
-			_, err = io.Copy(w, f)
-			return err
+				_, err = io.Copy(w, f)
+				return err
+			}()
 		})
 	})
 

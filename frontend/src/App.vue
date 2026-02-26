@@ -443,9 +443,9 @@ const downloadFolder = (path: string) => {
 const gamesList = [
   {
     id: 'oitrainer',
-    name: '信息学教练模拟器',
-    desc: '模拟信息学教练训练选手，从赛季训练到正式比赛的成长与抉择。',
-    path: '/games/OI 模拟器/index.html'
+    name: 'OI重开模拟器',
+    desc: '模拟信息学竞赛选手的成长历程，经历赛季训练与正式比赛的抉择。',
+    path: '/games/OI重开模拟器/index.html'
   },
   {
     id: 'recallbj8z',
