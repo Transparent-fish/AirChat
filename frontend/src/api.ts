@@ -27,10 +27,17 @@ export const fileApi = {
     uploadFolder: (formData: FormData) => api.post('/upload-folder', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
     }),
+    uploadFile: (formData: FormData) => api.post('/upload-file', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    }),
     getMyFolders: () => api.get('/my-folders'),
     getSharedFolders: (path?: string) => api.get('/shared-folders', { params: { path } }),
     deleteFolder: (name: string) => api.delete(`/delete-folder/${encodeURIComponent(name)}`),
-    downloadFolder: (path: string) => `${API_BASE}/download-folder?path=${encodeURIComponent(path)}`
+    downloadFolder: (path: string) => `${API_BASE}/download-folder?path=${encodeURIComponent(path)}`,
+    batchDownload: (paths: string[]) => {
+        const query = paths.map(p => `paths=${encodeURIComponent(p)}`).join('&')
+        return `${API_BASE}/batch-download?${query}`
+    }
 }
 
 export const adminApi = {
@@ -46,7 +53,8 @@ export const adminApi = {
     togglePermission: (data: { username: string, permission: string, value: boolean }) => api.post('/admin/toggle_permission', data),
     getPendingUploads: () => api.get('/admin/pending_uploads'),
     approveUpload: (id: number) => api.post('/admin/approve_upload', { id }),
-    rejectUpload: (id: number) => api.post('/admin/reject_upload', { id })
+    rejectUpload: (id: number) => api.post('/admin/reject_upload', { id }),
+    deleteSharedFile: (path: string) => api.delete(`/admin/delete-shared?path=${encodeURIComponent(path)}`)
 }
 
 export default api

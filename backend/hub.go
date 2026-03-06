@@ -1,7 +1,10 @@
 package main
 
+import "sync"
+
 // 2. 喵喵喵
 type Hub struct {
+	mu         sync.RWMutex
 	clients    map[*Client]bool
 	broadcast  chan Message // 广播通道
 	register   chan *Client // 新用户登记通道
@@ -22,27 +25,34 @@ func (h *Hub) run() {
 	for {
 		select {
 		case client := <-h.register:
+			h.mu.Lock()
 			h.clients[client] = true
+			h.mu.Unlock()
 		case client := <-h.unregister:
+			h.mu.Lock()
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
 			}
+			h.mu.Unlock()
 		case message := <-h.broadcast:
+			h.mu.RLock()
 			for client := range h.clients {
 				select {
 				case client.send <- message:
 				default:
-					close(client.send)
-					delete(h.clients, client)
+					// 并发场景下不在此处直接修改 map。后续写通道满时 client 也会自行退出触发 unregister
 				}
 			}
+			h.mu.RUnlock()
 		}
 	}
 }
 
 // 根据用户名断开在线用户连接
 func (h *Hub) disconnectByUsername(username string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	for client := range h.clients {
 		if client.Username == username {
 			// 发送强制断开消息
@@ -53,14 +63,16 @@ func (h *Hub) disconnectByUsername(username string) {
 			}:
 			default:
 			}
-			// 关闭连接
-			client.conn.Close()
+			// 只发送退出信号，不直接关闭，由 goroutine 自行退出
+			go client.conn.Close()
 		}
 	}
 }
 
 // 根据IP断开在线用户连接
 func (h *Hub) disconnectByIP(ip string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	for client := range h.clients {
 		if client.IP == ip {
 			// 发送强制断开消息
@@ -71,14 +83,15 @@ func (h *Hub) disconnectByIP(ip string) {
 			}:
 			default:
 			}
-			// 关闭连接
-			client.conn.Close()
+			go client.conn.Close()
 		}
 	}
 }
 
 // 根据IP列表检查并断开被封IP的连接（用于范围封禁等场景）
 func (h *Hub) disconnectBannedIPs() {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	for client := range h.clients {
 		if isIPBanned(client.IP) {
 			select {
@@ -88,7 +101,7 @@ func (h *Hub) disconnectBannedIPs() {
 			}:
 			default:
 			}
-			client.conn.Close()
+			go client.conn.Close()
 		}
 	}
 }

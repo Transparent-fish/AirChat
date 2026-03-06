@@ -12,6 +12,8 @@ import {
   Camera,
   LogIn,
   FolderUp,
+  FilePlus,
+  CheckCircle2,
   X,
   Trash2,
   Settings,
@@ -59,6 +61,10 @@ const currentGame = ref<string | null>(null)
 const showShareUI = ref(false)
 const mySharedFolders = ref<string[]>([])
 const isUploading = ref(false)
+
+// 多选文件状态
+const selectedFiles = ref<Set<string>>(new Set())
+const isSelectionMode = ref(false)
 
 // 管理面板
 const showAdminUI = ref(false)
@@ -296,6 +302,30 @@ const onShareFolder = async (e: Event) => {
   }
 }
 
+const onShareFile = async (e: Event) => {
+  const fileList = (e.target as HTMLInputElement).files
+  if (!fileList || fileList.length === 0) return
+  
+  const file = fileList[0]
+  if (!file) return
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  isUploading.value = true
+  try {
+    await fileApi.uploadFile(formData)
+    await fetchMyShares()
+    fetchFiles()
+    alert('文件分享成功！')
+  } catch (err) {
+    alert('文件上传失败')
+  } finally {
+    isUploading.value = false
+    ;(e.target as HTMLInputElement).value = ''
+  }
+}
+
 watch(showShareUI, (val) => {
   if (val) {
     fetchMyShares()
@@ -472,6 +502,37 @@ const downloadFolder = (path: string) => {
   window.open(fileApi.downloadFolder(path), '_blank')
 }
 
+// 多选逻辑
+const toggleSelect = (file: SharedFile) => {
+  const key = file.dirKey || file.name
+  if (selectedFiles.value.has(key)) {
+    selectedFiles.value.delete(key)
+  } else {
+    selectedFiles.value.add(key)
+  }
+}
+
+const batchDownload = () => {
+  if (selectedFiles.value.size === 0) return
+  const paths = Array.from(selectedFiles.value)
+  window.open(fileApi.batchDownload(paths), '_blank')
+  // 下载后清除选择模式
+  isSelectionMode.value = false
+  selectedFiles.value.clear()
+}
+
+// 管理员删除共享文件逻辑
+const handleAdminDeleteFile = async (file: SharedFile) => {
+  const key = file.dirKey || file.name
+  if (!confirm(`确定要强制删除此文件/文件夹吗？此操作不可恢复。\n路径: ${key}`)) return
+  try {
+    await adminApi.deleteSharedFile(key)
+    fetchFiles()
+  } catch (err) {
+    alert('删除失败')
+  }
+}
+
 const gamesList = [
   {
     id: 'oitrainer',
@@ -579,7 +640,7 @@ const selectGame = (game: any) => {
         </ul>
       </div>
 
-      <div class="mt-6 border-t border-white/30 pt-4">
+      <div class="mt-6 border-t border-white/30 pt-4 flex flex-col gap-3">
         <label class="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-[0.98] transition-all cursor-pointer">
           <template v-if="isUploading">
             <span class="animate-pulse">上传中...请稍候</span>
@@ -587,6 +648,16 @@ const selectGame = (game: any) => {
           <template v-else>
             <FolderUp :size="18" /> 选择文件夹并分享
             <input type="file" webkitdirectory directory multiple @change="onShareFolder" class="hidden" :disabled="isUploading" />
+          </template>
+        </label>
+        
+        <label class="w-full flex items-center justify-center gap-2 bg-emerald-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-600 active:scale-[0.98] transition-all cursor-pointer mt-1">
+          <template v-if="isUploading">
+            <span class="animate-pulse">上传中...请稍候</span>
+          </template>
+          <template v-else>
+            <FilePlus :size="18" /> 上传单个文件
+            <input type="file" @change="onShareFile" class="hidden" :disabled="isUploading" />
           </template>
         </label>
       </div>
@@ -975,9 +1046,23 @@ const selectGame = (game: any) => {
                 </div>
               </div>
             </div>
-            <button @click="showShareUI = true" class="bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-2">
-              <Plus :size="16" /> 我要分享
-            </button>
+            <div v-if="isSelectionMode" class="flex items-center gap-3">
+              <span class="text-sm font-bold text-slate-600">已选 {{ selectedFiles.size }} 项</span>
+              <button @click="batchDownload" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-2" :disabled="selectedFiles.size === 0">
+                <Download :size="16" /> 批量下载
+              </button>
+              <button @click="isSelectionMode = false; selectedFiles.clear()" class="bg-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-bold hover:bg-slate-300 transition-all">
+                取消选择
+              </button>
+            </div>
+            <div v-else class="flex items-center gap-3">
+              <button @click="isSelectionMode = true" class="bg-white/50 border border-white text-slate-600 px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:bg-white/80 active:scale-95 transition-all flex items-center gap-2">
+                <CheckCircle2 :size="16" /> 多选
+              </button>
+              <button @click="showShareUI = true" class="bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-2">
+                <Plus :size="16" /> 我要分享
+              </button>
+            </div>
           </header>
 
           <div class="flex-1 overflow-y-auto p-6 relative z-10">
@@ -988,10 +1073,16 @@ const selectGame = (game: any) => {
             <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div v-for="file in files" :key="file.dirKey" 
                    class="bg-white/60 p-4 rounded-2xl border border-white/50 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all cursor-pointer group relative">
-                <div @click="handleFileClick(file)" class="flex items-start gap-4">
-                  <div class="p-3 rounded-xl" :class="file.isDir ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'">
-                    <FolderOpen v-if="file.isDir" :size="24" />
-                    <Download v-else :size="24" />
+                <div @click="isSelectionMode ? toggleSelect(file) : handleFileClick(file)" class="flex items-start gap-4">
+                  <div class="relative">
+                    <div class="p-3 rounded-xl" :class="file.isDir ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'">
+                      <FolderOpen v-if="file.isDir" :size="24" />
+                      <Download v-else :size="24" />
+                    </div>
+                    <!-- 多选 Checkbox 遮罩 -->
+                    <div v-if="isSelectionMode" class="absolute -top-1 -right-1 w-5 h-5 rounded-full border-2 border-white shadow-sm flex items-center justify-center transition-colors" :class="selectedFiles.has(file.dirKey || file.name) ? 'bg-blue-500 text-white' : 'bg-slate-200 text-transparent'">
+                       <CheckCircle2 :size="12" />
+                    </div>
                   </div>
                   <div class="flex-1 min-w-0">
                     <p class="font-bold text-slate-700 truncate mb-0.5">{{ file.name }}</p>
@@ -1001,16 +1092,19 @@ const selectGame = (game: any) => {
                     </div>
                   </div>
                 </div>
-                <!-- 文件夹下载按钮 -->
-                <div v-if="file.isDir" class="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button @click.stop="downloadFolder(file.dirKey || file.name)" class="p-2 bg-white text-blue-600 rounded-lg shadow-sm hover:bg-blue-50 transition-colors" title="打包下载整个文件夹">
+                <!-- 操作按钮区域 (当不处于多选状态时显示) -->
+                <div v-if="!isSelectionMode" class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button v-if="file.isDir" @click.stop="downloadFolder(file.dirKey || file.name)" class="p-2 bg-white text-blue-600 rounded-lg shadow-sm hover:bg-blue-50 transition-colors" title="打包下载整个文件夹">
                     <Download :size="16" />
+                  </button>
+                  <button v-if="currentUser.role === 'admin' || currentUser.role === 'system'" @click.stop="handleAdminDeleteFile(file)" class="p-2 bg-white text-red-500 rounded-lg shadow-sm hover:bg-red-50 transition-colors border border-red-100" title="强制删除">
+                    <Trash2 :size="16" />
                   </button>
                 </div>
 
                 <h3 
-                  @click="handleFileClick(file)"
-                  class="font-black text-slate-800 truncate mb-1 text-sm tracking-tight cursor-pointer transition-colors"
+                  @click="isSelectionMode ? toggleSelect(file) : handleFileClick(file)"
+                  class="font-black text-slate-800 truncate mb-1 text-sm tracking-tight cursor-pointer transition-colors mt-2"
                   :class="file.isDir ? 'hover:text-blue-600' : 'hover:text-emerald-500'" 
                   :title="file.name"
                 >

@@ -454,6 +454,64 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"message": "上传成功", "status": "approved"})
 	})
 
+	// 上传单个文件（需登录）
+	r.POST("/api/upload-file", authMiddleware, func(c *gin.Context) {
+		username := c.MustGet("username").(string)
+
+		// 检查权限
+		var user User
+		if err := db.Where("username = ?", username).First(&user).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户不存在"})
+			return
+		}
+		if !user.CanShareFiles && user.Role == "user" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "您已被禁止共享文件"})
+			return
+		}
+
+		file, err := c.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无法获取文件"})
+			return
+		}
+
+		// 目标目录：./shared/<username>_uploads/
+		destDir := fmt.Sprintf("./shared/%s_uploads", username)
+		os.MkdirAll(destDir, os.ModePerm)
+
+		// 安全处理文件名
+		safeFileName := strings.ReplaceAll(file.Filename, "..", "")
+		safeFileName = strings.Trim(safeFileName, "/\\")
+		destPath := filepath.Join(destDir, safeFileName)
+
+		// > 150MB 走审核
+		if file.Size > 157286400 {
+			tempDir := fmt.Sprintf("./temp_uploads/%d_%s_file", time.Now().Unix(), username)
+			os.MkdirAll(tempDir, os.ModePerm)
+			tempPath := filepath.Join(tempDir, safeFileName)
+			if err := c.SaveUploadedFile(file, tempPath); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "保存文件失败"})
+				return
+			}
+			db.Create(&PendingUpload{
+				Username:   username,
+				FolderName: "uploads/" + safeFileName,
+				TotalSize:  file.Size,
+				Status:     "pending",
+				TempPath:   tempDir,
+			})
+			c.JSON(http.StatusOK, gin.H{"message": "上传成功，由于文件超过150MB，正在等待管理员审核", "status": "pending"})
+			return
+		}
+
+		if err := c.SaveUploadedFile(file, destPath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存文件失败"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "上传成功", "status": "approved"})
+	})
+
 	// 获取当前用户分享的文件夹列表（需登录）
 	r.GET("/api/my-folders", authMiddleware, func(c *gin.Context) {
 		username := c.MustGet("username").(string)
@@ -600,6 +658,78 @@ func main() {
 		})
 	})
 
+	// 批量下载指定文件和文件夹（打包为 zip）
+	r.GET("/api/batch-download", authMiddleware, func(c *gin.Context) {
+		paths := c.QueryArray("paths")
+		if len(paths) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "未提供下载路径"})
+			return
+		}
+
+		c.Header("Content-Disposition", "attachment; filename=\"batch_download.zip\"")
+		c.Header("Content-Type", "application/zip")
+
+		zw := zip.NewWriter(c.Writer)
+		defer zw.Close()
+
+		baseDir := "./shared"
+
+		for _, subPath := range paths {
+			subPath = strings.ReplaceAll(subPath, "..", "")
+			subPath = strings.Trim(subPath, "/\\")
+			targetDir := filepath.Join(baseDir, subPath)
+
+			info, err := os.Stat(targetDir)
+			if err != nil {
+				continue
+			}
+
+			if info.IsDir() {
+				filepath.Walk(targetDir, func(path string, fInfo os.FileInfo, err error) error {
+					if err != nil || fInfo.IsDir() {
+						return nil
+					}
+					// 保持相对于当前下载项的目录结构
+					relPath, err := filepath.Rel(targetDir, path)
+					if err != nil {
+						return nil
+					}
+					// 在 zip 内放在以该文件夹命名的目录下
+					zipPath := filepath.Join(info.Name(), relPath)
+					zipPath = strings.ReplaceAll(zipPath, "\\", "/")
+
+					return func() error {
+						f, err := os.Open(path)
+						if err != nil {
+							return err
+						}
+						defer f.Close()
+						w, err := zw.Create(zipPath)
+						if err != nil {
+							return err
+						}
+						_, err = io.Copy(w, f)
+						return err
+					}()
+				})
+			} else {
+				// 单个文件
+				func() {
+					f, err := os.Open(targetDir)
+					if err != nil {
+						return
+					}
+					defer f.Close()
+					w, err := zw.Create(info.Name())
+					if err != nil {
+						return
+					}
+					io.Copy(w, f)
+				}()
+			}
+		}
+	})
+
 	// 离线游戏静态资源
 	os.MkdirAll("./games", os.ModePerm)
 	r.Static("/games", "./games")
@@ -666,6 +796,41 @@ func main() {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "操作成功"})
+	})
+
+	// 管理员强制删除共享文件/文件夹
+	adminGroup.DELETE("/delete-shared", func(c *gin.Context) {
+		subPath := c.Query("path")
+		if subPath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "未提供路径"})
+			return
+		}
+
+		// 防止路径穿越
+		subPath = strings.ReplaceAll(subPath, "..", "")
+		subPath = strings.Trim(subPath, "/\\")
+
+		targetDir := filepath.Join("./shared", subPath)
+
+		// 校验文件是否存在且位于 shared 目录
+		absTarget, err := filepath.Abs(targetDir)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的路径"})
+			return
+		}
+
+		absShared, _ := filepath.Abs("./shared")
+		if !strings.HasPrefix(absTarget, absShared) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "无法删除 shared 目录外的文件"})
+			return
+		}
+
+		if err := os.RemoveAll(targetDir); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败: " + err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "文件(夹)已删除"})
 	})
 
 	// 切换封禁状态
@@ -788,39 +953,9 @@ func main() {
 			}
 		} else {
 			// 解封操作
-			// 如果传入的IP精确匹配某条记录直接删除
+			// 只支持精确匹配解封，避免误删导致大范围放行
 			if err := db.Where("ip = ?", req.IP).Delete(&IPBan{}).Error; err != nil {
 				// ignore
-			}
-
-			// 对输入单个IP检查在不在哪个网段/范围中，然后删网段记录 (简单处理: 检查该IP是否受某条 ban 规则影响，如果有则移除该影响的规则)
-			parsedIP := net.ParseIP(req.IP)
-			if parsedIP != nil {
-				var bans []IPBan
-				db.Find(&bans)
-				for _, ban := range bans {
-					if ban.IsRange {
-						if strings.Contains(ban.IP, "/") {
-							_, ipNet, err := net.ParseCIDR(ban.IP)
-							if err == nil && ipNet.Contains(parsedIP) {
-								db.Where("ip = ?", ban.IP).Delete(&IPBan{})
-							}
-						} else if strings.Contains(ban.IP, "-") {
-							parts := strings.Split(ban.IP, "-")
-							if len(parts) == 2 {
-								start := net.ParseIP(strings.TrimSpace(parts[0])).To4()
-								end := net.ParseIP(strings.TrimSpace(parts[1])).To4()
-								target := parsedIP.To4()
-
-								if start != nil && end != nil && target != nil {
-									if bytes.Compare(target, start) >= 0 && bytes.Compare(target, end) <= 0 {
-										db.Where("ip = ?", ban.IP).Delete(&IPBan{})
-									}
-								}
-							}
-						}
-					}
-				}
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "操作成功"})
@@ -986,11 +1121,45 @@ func main() {
 
 		destDir := fmt.Sprintf("./shared/%s_%s", pending.Username, pending.FolderName)
 
-		// 移动临时文件夹到 shared 目录下
+		// 将相对路径中的 / 统一为系统分隔符处理目标路径
+		destDir = filepath.Clean(destDir)
+
+		// 移动临时文件/文件夹到 shared 目录下
 		if err := os.Rename(pending.TempPath, destDir); err != nil {
-			// 如果在不同挂载点 Rename 可能会抛出 cross-device link 错误，由于我们的 temp_uploads 和 shared 都在本项目内，直接 Rename 应该是安全的。
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "移动文件失败: " + err.Error()})
-			return
+			// 如果在不同挂载点 Rename 可能会抛出 cross-device link 错误
+			// 实现跨盘或 fallback 复制机制
+			errCopy := filepath.Walk(pending.TempPath, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				relPath, err := filepath.Rel(pending.TempPath, path)
+				if err != nil {
+					return err
+				}
+				targetPath := filepath.Join(destDir, relPath)
+				if info.IsDir() {
+					return os.MkdirAll(targetPath, info.Mode())
+				}
+				srcFile, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer srcFile.Close()
+				dstFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+				if err != nil {
+					return err
+				}
+				defer dstFile.Close()
+				_, err = io.Copy(dstFile, srcFile)
+				return err
+			})
+
+			if errCopy != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "移动文件失败且复制回退也失败: " + errCopy.Error()})
+				return
+			}
+			// 复制成功，删除原临时目录
+			os.RemoveAll(pending.TempPath)
 		}
 
 		db.Model(&pending).Update("status", "approved")
