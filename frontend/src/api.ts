@@ -42,7 +42,11 @@ export const adminApi = {
     changePassword: (data: { new_password: string }) => api.post('/admin/password', data),
     setRole: (data: { username: string, role: string }) => api.post('/admin/set_role', data),
     changeSystemPassword: (data: { new_password: string }) => api.post('/admin/system_password', data),
-    deleteUser: (username: string) => api.delete(`/admin/users/${username}`)
+    deleteUser: (username: string) => api.delete(`/admin/users/${username}`),
+    togglePermission: (data: { username: string, permission: string, value: boolean }) => api.post('/admin/toggle_permission', data),
+    getPendingUploads: () => api.get('/admin/pending_uploads'),
+    approveUpload: (id: number) => api.post('/admin/approve_upload', { id }),
+    rejectUpload: (id: number) => api.post('/admin/reject_upload', { id })
 }
 
 export default api
