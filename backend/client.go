@@ -17,8 +17,9 @@ type Client struct {
 	send       chan Message    // 消息
 	Username   string          // 用户昵称
 	Avatar     string          // 头像
-	Role       string          // 角色: user, admin
+	Role       string          // 角色: user, admin, system
 	Identifier string          // 唯一标识 (IP + Port)
+	IP         string          // 客户端 IP 地址
 }
 
 // 读发的消息
@@ -104,12 +105,6 @@ func (c *Client) handleCommand(content string) {
 	args := parts[1:]
 
 	switch cmd {
-	case "/nick":
-		if len(args) > 0 {
-			oldName := c.Username
-			c.Username = strings.Join(args, " ")
-			c.sendSystemMsg(fmt.Sprintf("用户 %s 已更名为 %s", oldName, c.Username))
-		}
 	case "/admin":
 		if c.Role == "system" {
 			c.sendSystemMsg("您已经是系统最高管理权限，无需认证。")
@@ -133,9 +128,9 @@ func (c *Client) handleCommand(content string) {
 	case "/system":
 		// 使用数据库事务来避免竞态条件
 		err := db.Transaction(func(tx *gorm.DB) error {
-			// 检查是否已经存在 system 用户
+			// 检查是否已经存在主 system 用户 (system_level=1)
 			var count int64
-			tx.Model(&User{}).Where("role = ?", "system").Count(&count)
+			tx.Model(&User{}).Where("role = ? AND system_level = 1", "system").Count(&count)
 			if count > 0 && c.Role != "system" {
 				return fmt.Errorf("系统管理员已初始化。如需提升权限，请联系现有系统管理员。")
 			}
@@ -144,7 +139,11 @@ func (c *Client) handleCommand(content string) {
 			tx.Where("key = ?", "system_password").First(&sysConfig)
 			if len(args) > 0 && args[0] == sysConfig.Value {
 				c.Role = "system"
-				if err := tx.Model(&User{}).Where("username = ?", c.Username).Update("role", "system").Error; err != nil {
+				// 设为主system (level=1)
+				if err := tx.Model(&User{}).Where("username = ?", c.Username).Updates(map[string]interface{}{
+					"role":         "system",
+					"system_level": 1,
+				}).Error; err != nil {
 					return err
 				}
 				return nil

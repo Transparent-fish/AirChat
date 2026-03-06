@@ -12,6 +12,8 @@ import {
   Camera,
   LogIn,
   FolderUp,
+  FilePlus,
+  CheckCircle2,
   X,
   Trash2,
   Settings,
@@ -19,7 +21,9 @@ import {
   Ban,
   Lock,
   Gamepad2,
-  Maximize2
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-vue-next'
 import { authApi, adminApi, fileApi } from './api'
 import { watch } from 'vue'
@@ -58,6 +62,10 @@ const showShareUI = ref(false)
 const mySharedFolders = ref<string[]>([])
 const isUploading = ref(false)
 
+// 多选文件状态
+const selectedFiles = ref<Set<string>>(new Set())
+const isSelectionMode = ref(false)
+
 // 管理面板
 const showAdminUI = ref(false)
 const adminTab = ref<'users' | 'ips' | 'system'>('users')
@@ -65,8 +73,10 @@ const adminUsers = ref<any[]>([])
 const bannedIPs = ref<any[]>([])
 const newBanIP = ref('')
 const newBanIPEnd = ref('')
+const unbanIPInput = ref('')
 const newAdminPassword = ref('')
 const newSystemPassword = ref('')
+const isSidebarCollapsed = ref(false)
 
 const fetchAdminUsers = async () => {
   try {
@@ -118,6 +128,16 @@ const toggleRole = async (user: any) => {
   }
 }
 
+const togglePermission = async (user: any, perm: string, val: boolean) => {
+  if (!canManage(user)) return
+  try {
+    await adminApi.togglePermission({ username: user.username, permission: perm, value: val })
+    await fetchAdminUsers()
+  } catch (e) {
+    alert('修改权限失败')
+  }
+}
+
 const handleDeleteUser = async (user: any) => {
   if (!confirm(`确定要彻底删除用户 ${user.username} 吗？此操作不可撤销。`)) return
   if (!canManage(user)) return
@@ -159,6 +179,18 @@ const handleUnbanIP = async (ip: string) => {
     await fetchBannedIPs()
   } catch (e) {
     alert('解封失败')
+  }
+}
+
+const handleUnbanIPByInput = async () => {
+  if (!unbanIPInput.value.trim()) return
+  try {
+    await adminApi.banIP({ ip: unbanIPInput.value.trim(), action: 'unban' })
+    unbanIPInput.value = ''
+    await fetchBannedIPs()
+    alert('解封成功')
+  } catch (e) {
+    alert('解封失败: ' + (e as any).response?.data?.error)
   }
 }
 
@@ -205,7 +237,9 @@ const authError = ref('')
 const currentUser = ref({
   name: localStorage.getItem('airchat_name') || '',
   avatar: localStorage.getItem('airchat_avatar') || '',
-  role: localStorage.getItem('airchat_role') || 'user'
+  role: localStorage.getItem('airchat_role') || 'user',
+  canPlayGames: localStorage.getItem('airchat_can_play_games') !== 'false',
+  canShareFiles: localStorage.getItem('airchat_can_share_files') !== 'false'
 })
 
 // --- 核心逻辑 ---
@@ -268,6 +302,30 @@ const onShareFolder = async (e: Event) => {
   }
 }
 
+const onShareFile = async (e: Event) => {
+  const fileList = (e.target as HTMLInputElement).files
+  if (!fileList || fileList.length === 0) return
+  
+  const file = fileList[0]
+  if (!file) return
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  isUploading.value = true
+  try {
+    await fileApi.uploadFile(formData)
+    await fetchMyShares()
+    fetchFiles()
+    alert('文件分享成功！')
+  } catch (err) {
+    alert('文件上传失败')
+  } finally {
+    isUploading.value = false
+    ;(e.target as HTMLInputElement).value = ''
+  }
+}
+
 watch(showShareUI, (val) => {
   if (val) {
     fetchMyShares()
@@ -287,11 +345,15 @@ const handleAuth = async () => {
       localStorage.setItem('airchat_name', res.data.username)
       localStorage.setItem('airchat_avatar', res.data.avatar)
       localStorage.setItem('airchat_role', res.data.role)
+      localStorage.setItem('airchat_can_play_games', String(res.data.can_play_games))
+      localStorage.setItem('airchat_can_share_files', String(res.data.can_share_files))
       
       currentUser.value = {
         name: res.data.username,
         avatar: res.data.avatar,
-        role: res.data.role
+        role: res.data.role,
+        canPlayGames: res.data.can_play_games !== false,
+        canShareFiles: res.data.can_share_files !== false
       }
       isLogined.value = true
       connectWS()
@@ -440,6 +502,37 @@ const downloadFolder = (path: string) => {
   window.open(fileApi.downloadFolder(path), '_blank')
 }
 
+// 多选逻辑
+const toggleSelect = (file: SharedFile) => {
+  const key = file.dirKey || file.name
+  if (selectedFiles.value.has(key)) {
+    selectedFiles.value.delete(key)
+  } else {
+    selectedFiles.value.add(key)
+  }
+}
+
+const batchDownload = () => {
+  if (selectedFiles.value.size === 0) return
+  const paths = Array.from(selectedFiles.value)
+  window.open(fileApi.batchDownload(paths), '_blank')
+  // 下载后清除选择模式
+  isSelectionMode.value = false
+  selectedFiles.value.clear()
+}
+
+// 管理员删除共享文件逻辑
+const handleAdminDeleteFile = async (file: SharedFile) => {
+  const key = file.dirKey || file.name
+  if (!confirm(`确定要强制删除此文件/文件夹吗？此操作不可恢复。\n路径: ${key}`)) return
+  try {
+    await adminApi.deleteSharedFile(key)
+    fetchFiles()
+  } catch (err) {
+    alert('删除失败')
+  }
+}
+
 const gamesList = [
   {
     id: 'oitrainer',
@@ -547,7 +640,7 @@ const selectGame = (game: any) => {
         </ul>
       </div>
 
-      <div class="mt-6 border-t border-white/30 pt-4">
+      <div class="mt-6 border-t border-white/30 pt-4 flex flex-col gap-3">
         <label class="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-[0.98] transition-all cursor-pointer">
           <template v-if="isUploading">
             <span class="animate-pulse">上传中...请稍候</span>
@@ -555,6 +648,16 @@ const selectGame = (game: any) => {
           <template v-else>
             <FolderUp :size="18" /> 选择文件夹并分享
             <input type="file" webkitdirectory directory multiple @change="onShareFolder" class="hidden" :disabled="isUploading" />
+          </template>
+        </label>
+        
+        <label class="w-full flex items-center justify-center gap-2 bg-emerald-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-600 active:scale-[0.98] transition-all cursor-pointer mt-1">
+          <template v-if="isUploading">
+            <span class="animate-pulse">上传中...请稍候</span>
+          </template>
+          <template v-else>
+            <FilePlus :size="18" /> 上传单个文件
+            <input type="file" @change="onShareFile" class="hidden" :disabled="isUploading" />
           </template>
         </label>
       </div>
@@ -597,6 +700,8 @@ const selectGame = (game: any) => {
                     <th class="px-4 py-3 font-bold text-center">禁言</th>
                     <th class="px-4 py-3 font-bold text-center">封号</th>
                     <th class="px-4 py-3 font-bold text-center">账号管理</th>
+                    <th class="px-4 py-3 font-bold text-center">共享权</th>
+                    <th class="px-4 py-3 font-bold text-center">游戏权</th>
                     <th v-if="currentUser.role === 'system'" class="px-4 py-3 font-bold text-center">系统权</th>
                   </tr>
                 </thead>
@@ -630,6 +735,18 @@ const selectGame = (game: any) => {
                       </button>
                       <span v-else class="text-slate-300 text-xs">-</span>
                     </td>
+                    <td class="px-4 py-2 text-center">
+                      <button v-if="canManage(user)" @click="togglePermission(user, 'can_share_files', !user.can_share_files)" :class="!user.can_share_files ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'" class="text-white px-3 py-1 rounded-lg font-bold text-xs shadow-sm transition-colors cursor-pointer">
+                        {{ user.can_share_files ? '允许' : '禁止' }}
+                      </button>
+                      <span v-else class="text-slate-300 text-xs">-</span>
+                    </td>
+                    <td class="px-4 py-2 text-center">
+                      <button v-if="canManage(user)" @click="togglePermission(user, 'can_play_games', !user.can_play_games)" :class="!user.can_play_games ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'" class="text-white px-3 py-1 rounded-lg font-bold text-xs shadow-sm transition-colors cursor-pointer">
+                        {{ user.can_play_games ? '允许' : '禁止' }}
+                      </button>
+                      <span v-else class="text-slate-300 text-xs">-</span>
+                    </td>
                     <td v-if="currentUser.role === 'system'" class="px-4 py-2 text-center">
                       <button v-if="user.role !== 'system'" @click="toggleRole(user)" :class="user.role === 'admin' ? 'bg-orange-400 hover:bg-orange-500' : 'bg-indigo-500 hover:bg-indigo-600'" class="text-white px-3 py-1 rounded-lg font-bold text-xs shadow-sm transition-colors cursor-pointer">
                         {{ user.role === 'admin' ? '降权' : '升权' }}
@@ -655,6 +772,12 @@ const selectGame = (game: any) => {
             </div>
 
             <h4 class="font-bold text-lg mb-4 text-slate-700">已封禁列表</h4>
+            <div class="flex gap-2 mb-4 items-center bg-white/40 p-3 rounded-2xl border border-white/50">
+              <input v-model="unbanIPInput" placeholder="输入要解封的IP或网段" class="flex-1 px-4 py-2.5 rounded-xl border border-white/50 bg-white/80 focus:ring-2 focus:ring-slate-200 outline-none transition-all shadow-inner font-medium text-sm" @keyup.enter="handleUnbanIPByInput"/>
+              <button @click="handleUnbanIPByInput" class="bg-slate-500 hover:bg-slate-600 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-slate-200 flex items-center gap-2 transition-all active:scale-95 cursor-pointer ml-2 whitespace-nowrap">
+                直接解封
+              </button>
+            </div>
             <div v-if="bannedIPs.length === 0" class="text-slate-400 text-center py-6 bg-white/20 rounded-xl">暂无封禁记录</div>
             <ul v-else class="space-y-2">
               <li v-for="ban in bannedIPs" :key="ban.ip" class="flex justify-between items-center bg-white/50 p-3 rounded-xl shadow-sm border border-white/50">
@@ -718,76 +841,105 @@ const selectGame = (game: any) => {
 
   <div class="flex h-screen overflow-hidden bg-slate-50">
     <!-- 侧边栏 -->
-    <aside class="w-72 glass flex flex-col border-r border-slate-200/50 z-10 m-4 rounded-3xl shadow-xl overflow-hidden">
-      <div class="p-6">
-        <div class="flex items-center gap-3 mb-8">
-          <div class="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-200">
+    <aside 
+      :class="[
+        'glass flex flex-col z-10 m-4 rounded-3xl shadow-xl overflow-visible transition-all duration-500 ease-in-out relative border-r border-slate-200/50',
+        isSidebarCollapsed ? 'w-24' : 'w-72'
+      ]"
+    >
+      <!-- 折叠/展开按钮 -->
+      <button 
+        @click="isSidebarCollapsed = !isSidebarCollapsed" 
+        class="absolute -right-4 top-10 bg-white border border-slate-200 shadow-md p-1.5 rounded-full text-slate-400 hover:text-blue-600 z-50 transition-colors"
+      >
+        <ChevronRight v-if="isSidebarCollapsed" :size="20" />
+        <ChevronLeft v-else :size="20" />
+      </button>
+
+      <div class="p-6 pb-2 transition-all">
+        <div class="flex items-center gap-3 mb-8" :class="isSidebarCollapsed ? 'justify-center' : ''">
+          <div class="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-200 shrink-0">
             <MessageSquare :size="20" />
           </div>
-          <h1 class="text-xl font-bold tracking-tight text-slate-800">蒙青创OJ</h1>
+          <h1 v-show="!isSidebarCollapsed" class="text-xl font-bold tracking-tight text-slate-800 whitespace-nowrap animate-in fade-in zoom-in duration-300">
+            蒙青创OJ
+          </h1>
         </div>
 
         <nav class="space-y-2">
           <button 
             @click="activeTab = 'chat'"
-            :class="activeTab === 'chat' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-600 hover:bg-white/50'"
-            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 font-medium group"
+            :class="[
+              activeTab === 'chat' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-600 hover:bg-white/50',
+              isSidebarCollapsed ? 'justify-center px-0' : 'px-4'
+            ]"
+            class="w-full flex items-center gap-3 py-3 rounded-xl transition-all duration-300 font-medium group relative"
+            title="公共频道"
           >
-            <MessageSquare :size="18" />
-            公共频道
+            <MessageSquare :size="18" class="shrink-0" />
+            <span v-show="!isSidebarCollapsed" class="whitespace-nowrap">公共频道</span>
           </button>
 
           <button 
             @click="activeTab = 'files'"
-            :class="activeTab === 'files' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-600 hover:bg-white/50'"
-            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 font-medium group"
+            :class="[
+              activeTab === 'files' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-600 hover:bg-white/50',
+              isSidebarCollapsed ? 'justify-center px-0' : 'px-4'
+            ]"
+            class="w-full flex items-center gap-3 py-3 rounded-xl transition-all duration-300 font-medium group relative"
+            title="资源共享库"
           >
-            <FolderOpen :size="18" />
-            资源共享库
+            <FolderOpen :size="18" class="shrink-0" />
+            <span v-show="!isSidebarCollapsed" class="whitespace-nowrap">资源共享库</span>
           </button>
 
           <button 
             @click="activeTab = 'games'; currentGame = null"
-            :class="activeTab === 'games' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-600 hover:bg-white/50'"
-            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 font-medium group"
+            :class="[
+              activeTab === 'games' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-600 hover:bg-white/50',
+              isSidebarCollapsed ? 'justify-center px-0' : 'px-4'
+            ]"
+            class="w-full flex items-center gap-3 py-3 rounded-xl transition-all duration-300 font-medium group relative"
+            title="游戏中心"
           >
-            <Gamepad2 :size="18" />
-            游戏中心
+            <Gamepad2 :size="18" class="shrink-0" />
+            <span v-show="!isSidebarCollapsed" class="whitespace-nowrap">游戏中心</span>
           </button>
           
           <button 
             v-if="currentUser.role === 'admin' || currentUser.role === 'system'"
             @click="showAdminUI = true"
-            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 font-medium group text-slate-600 hover:bg-white/50 mt-2"
+            :class="isSidebarCollapsed ? 'justify-center px-0' : 'px-4'"
+            class="w-full flex items-center gap-3 py-3 rounded-xl transition-all duration-300 font-medium group text-slate-600 hover:bg-white/50 mt-2 relative"
+            title="系统管理终端"
           >
-            <Settings :size="18" />
-            系统管理终端
+            <Settings :size="18" class="shrink-0" />
+            <span v-show="!isSidebarCollapsed" class="whitespace-nowrap">系统管理终端</span>
           </button>
         </nav>
       </div>
 
-      <div class="mt-auto p-4">
-        <div class="p-4 rounded-2xl bg-white/60 backdrop-blur-sm border border-white/50 shadow-sm relative group/profile">
-          <button @click="logout" class="absolute -top-2 -right-2 bg-white p-1.5 rounded-full shadow-md text-slate-400 hover:text-red-500 transition-colors">
+      <div class="mt-auto p-4 transition-all">
+        <div class="p-3 rounded-2xl bg-white/60 backdrop-blur-sm border border-white/50 shadow-sm relative group/profile flex" :class="isSidebarCollapsed ? 'justify-center' : 'items-center gap-3'">
+          <button @click="logout" class="absolute -top-2 -right-2 bg-white p-1.5 rounded-full shadow-md text-slate-400 hover:text-red-500 transition-colors z-20">
             <LogOut :size="14" />
           </button>
           
-          <div class="flex items-center gap-3 mb-1">
-            <div class="relative cursor-pointer overflow-hidden rounded-full w-12 h-12 bg-slate-200 group-hover:ring-2 ring-blue-400 transition-all">
-              <img :src="getAvatarUrl(currentUser.avatar)" class="w-full h-full object-cover" alt="avatar" />
-              <label class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/profile:opacity-100 transition-opacity cursor-pointer">
-                <Camera class="text-white" :size="16" />
-                <input type="file" @change="onAvatarChange" class="hidden" accept="image/*" />
-              </label>
-            </div>
-        <div class="overflow-hidden leading-tight flex flex-col justify-center">
-              <p class="font-bold text-slate-800 truncate">{{ currentUser.name }}</p>
-              <div class="flex items-center gap-1 mt-0.5">
-                <ShieldAlert v-if="currentUser.role === 'system'" :size="12" class="text-purple-500 shrink-0" />
-                <ShieldCheck v-else-if="currentUser.role === 'admin'" :size="12" class="text-amber-500 shrink-0" />
-                <span class="text-[10px] uppercase font-bold tracking-widest leading-none mt-px" 
-                      :class="currentUser.role === 'system' ? 'text-purple-500/80' : 'text-slate-400'">{{ currentUser.role }}</span>
-              </div>
+          <div class="relative cursor-pointer overflow-hidden rounded-full shrink-0 bg-slate-200 group-hover:ring-2 ring-blue-400 transition-all" :class="isSidebarCollapsed ? 'w-10 h-10' : 'w-12 h-12'">
+            <img :src="getAvatarUrl(currentUser.avatar)" class="w-full h-full object-cover" alt="avatar" />
+            <label class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/profile:opacity-100 transition-opacity cursor-pointer">
+              <Camera class="text-white" :size="16" />
+              <input type="file" @change="onAvatarChange" class="hidden" accept="image/*" />
+            </label>
+          </div>
+
+          <div v-show="!isSidebarCollapsed" class="overflow-hidden leading-tight flex flex-col justify-center animate-in fade-in duration-300 min-w-0">
+            <p class="font-bold text-slate-800 truncate">{{ currentUser.name }}</p>
+            <div class="flex items-center gap-1 mt-0.5">
+              <ShieldAlert v-if="currentUser.role === 'system'" :size="12" class="text-purple-500 shrink-0" />
+              <ShieldCheck v-else-if="currentUser.role === 'admin'" :size="12" class="text-amber-500 shrink-0" />
+              <span class="text-[10px] uppercase font-bold tracking-widest leading-none mt-px" 
+                    :class="currentUser.role === 'system' ? 'text-purple-500/80' : 'text-slate-400'">{{ currentUser.role }}</span>
             </div>
           </div>
         </div>
@@ -803,7 +955,7 @@ const selectGame = (game: any) => {
         <div class="absolute -bottom-24 -left-24 w-64 h-64 bg-purple-400/10 rounded-full blur-3xl pointer-events-none"></div>
 
         <!-- 聊天内容页 -->
-        <template v-if="activeTab === 'chat'">
+        <div v-show="activeTab === 'chat'" class="flex-1 flex flex-col min-h-0">
           <header class="h-20 flex items-center px-8 border-b border-white/20 bg-white/30 backdrop-blur-sm relative z-10">
             <div class="flex items-center gap-3">
               <div class="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]"></div>
@@ -877,10 +1029,10 @@ const selectGame = (game: any) => {
               </button>
             </div>
           </footer>
-        </template>
+        </div>
 
         <!-- 资源共享页 -->
-        <template v-else-if="activeTab === 'files'">
+        <div v-show="activeTab === 'files'" class="flex-1 flex flex-col min-h-0">
           <header class="h-20 flex items-center justify-between px-8 border-b border-white/20 bg-white/30 backdrop-blur-sm relative z-10">
             <div class="flex items-center gap-4">
               <button v-if="currentPath" @click="goBack" class="p-2 hover:bg-white/50 rounded-lg text-slate-500 transition-colors">
@@ -894,9 +1046,23 @@ const selectGame = (game: any) => {
                 </div>
               </div>
             </div>
-            <button @click="showShareUI = true" class="bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-2">
-              <Plus :size="16" /> 我要分享
-            </button>
+            <div v-if="isSelectionMode" class="flex items-center gap-3">
+              <span class="text-sm font-bold text-slate-600">已选 {{ selectedFiles.size }} 项</span>
+              <button @click="batchDownload" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-2" :disabled="selectedFiles.size === 0">
+                <Download :size="16" /> 批量下载
+              </button>
+              <button @click="isSelectionMode = false; selectedFiles.clear()" class="bg-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-bold hover:bg-slate-300 transition-all">
+                取消选择
+              </button>
+            </div>
+            <div v-else class="flex items-center gap-3">
+              <button @click="isSelectionMode = true" class="bg-white/50 border border-white text-slate-600 px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:bg-white/80 active:scale-95 transition-all flex items-center gap-2">
+                <CheckCircle2 :size="16" /> 多选
+              </button>
+              <button @click="showShareUI = true" class="bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-2">
+                <Plus :size="16" /> 我要分享
+              </button>
+            </div>
           </header>
 
           <div class="flex-1 overflow-y-auto p-6 relative z-10">
@@ -907,10 +1073,16 @@ const selectGame = (game: any) => {
             <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div v-for="file in files" :key="file.dirKey" 
                    class="bg-white/60 p-4 rounded-2xl border border-white/50 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all cursor-pointer group relative">
-                <div @click="handleFileClick(file)" class="flex items-start gap-4">
-                  <div class="p-3 rounded-xl" :class="file.isDir ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'">
-                    <FolderOpen v-if="file.isDir" :size="24" />
-                    <Download v-else :size="24" />
+                <div @click="isSelectionMode ? toggleSelect(file) : handleFileClick(file)" class="flex items-start gap-4">
+                  <div class="relative">
+                    <div class="p-3 rounded-xl" :class="file.isDir ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'">
+                      <FolderOpen v-if="file.isDir" :size="24" />
+                      <Download v-else :size="24" />
+                    </div>
+                    <!-- 多选 Checkbox 遮罩 -->
+                    <div v-if="isSelectionMode" class="absolute -top-1 -right-1 w-5 h-5 rounded-full border-2 border-white shadow-sm flex items-center justify-center transition-colors" :class="selectedFiles.has(file.dirKey || file.name) ? 'bg-blue-500 text-white' : 'bg-slate-200 text-transparent'">
+                       <CheckCircle2 :size="12" />
+                    </div>
                   </div>
                   <div class="flex-1 min-w-0">
                     <p class="font-bold text-slate-700 truncate mb-0.5">{{ file.name }}</p>
@@ -920,16 +1092,19 @@ const selectGame = (game: any) => {
                     </div>
                   </div>
                 </div>
-                <!-- 文件夹下载按钮 -->
-                <div v-if="file.isDir" class="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button @click.stop="downloadFolder(file.dirKey || file.name)" class="p-2 bg-white text-blue-600 rounded-lg shadow-sm hover:bg-blue-50 transition-colors" title="打包下载整个文件夹">
+                <!-- 操作按钮区域 (当不处于多选状态时显示) -->
+                <div v-if="!isSelectionMode" class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button v-if="file.isDir" @click.stop="downloadFolder(file.dirKey || file.name)" class="p-2 bg-white text-blue-600 rounded-lg shadow-sm hover:bg-blue-50 transition-colors" title="打包下载整个文件夹">
                     <Download :size="16" />
+                  </button>
+                  <button v-if="currentUser.role === 'admin' || currentUser.role === 'system'" @click.stop="handleAdminDeleteFile(file)" class="p-2 bg-white text-red-500 rounded-lg shadow-sm hover:bg-red-50 transition-colors border border-red-100" title="强制删除">
+                    <Trash2 :size="16" />
                   </button>
                 </div>
 
                 <h3 
-                  @click="handleFileClick(file)"
-                  class="font-black text-slate-800 truncate mb-1 text-sm tracking-tight cursor-pointer transition-colors"
+                  @click="isSelectionMode ? toggleSelect(file) : handleFileClick(file)"
+                  class="font-black text-slate-800 truncate mb-1 text-sm tracking-tight cursor-pointer transition-colors mt-2"
                   :class="file.isDir ? 'hover:text-blue-600' : 'hover:text-emerald-500'" 
                   :title="file.name"
                 >
@@ -942,12 +1117,15 @@ const selectGame = (game: any) => {
               </div>
             </div>
           </div>
-        </template>
+        </div>
 
         <!-- 游戏中心页 -->
-        <template v-else-if="activeTab === 'games'">
+        <div v-show="activeTab === 'games'" class="flex-1 flex flex-col min-h-0">
           <header class="h-20 flex items-center justify-between px-8 border-b border-white/20 bg-white/30 backdrop-blur-sm relative z-10">
             <div class="flex items-center gap-3">
+              <button v-if="currentGame" @click="currentGame = null" class="p-2 hover:bg-white/50 rounded-lg text-slate-500 transition-colors mr-2">
+                <ArrowLeft :size="20" />
+              </button>
               <div class="p-2 bg-purple-600 rounded-xl text-white shadow-lg shadow-purple-200">
                 <Gamepad2 :size="20" />
               </div>
@@ -956,14 +1134,11 @@ const selectGame = (game: any) => {
                 <p class="text-[10px] text-slate-500 font-medium">OFFLINE GAMES HUB</p>
               </div>
             </div>
-            <button v-if="currentGame" @click="currentGame = null" class="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all flex items-center gap-2">
-              返回列表
-            </button>
           </header>
 
           <div class="flex-1 overflow-hidden relative z-10 flex flex-col">
             <!-- 游戏选择列表 -->
-            <div v-if="!currentGame" class="flex-1 overflow-y-auto p-8">
+            <div v-show="!currentGame" class="flex-1 overflow-y-auto p-8">
               <div class="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div v-for="game in gamesList" :key="game.id" 
                      @click="selectGame(game)"
@@ -991,23 +1166,15 @@ const selectGame = (game: any) => {
             </div>
 
             <!-- 游戏 Iframe 容器 -->
-            <div v-else class="flex-1 bg-black relative">
+            <div v-if="currentGame" class="flex-1 bg-black relative">
               <iframe 
                 :src="currentGame" 
                 class="w-full h-full border-none"
                 allow="autoplay; fullscreen"
               ></iframe>
-              <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 opacity-50 hover:opacity-100 transition-opacity">
-                <button @click="currentGame = null" class="bg-white/20 backdrop-blur-md text-white px-6 py-2 rounded-full font-bold border border-white/30 hover:bg-white/40 transition-all flex items-center gap-2">
-                   退出游戏
-                </button>
-                <div class="bg-black/50 backdrop-blur-md text-white px-4 py-2 rounded-full text-xs flex items-center gap-2">
-                  <Maximize2 :size="12" /> 全屏请使用键盘 F11
-                </div>
-              </div>
             </div>
           </div>
-        </template>
+        </div>
       </div>
     </main>
   </div>
