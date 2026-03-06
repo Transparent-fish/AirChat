@@ -105,12 +105,6 @@ func (c *Client) handleCommand(content string) {
 	args := parts[1:]
 
 	switch cmd {
-	case "/nick":
-		if len(args) > 0 {
-			oldName := c.Username
-			c.Username = strings.Join(args, " ")
-			c.sendSystemMsg(fmt.Sprintf("用户 %s 已更名为 %s", oldName, c.Username))
-		}
 	case "/admin":
 		if c.Role == "system" {
 			c.sendSystemMsg("您已经是系统最高管理权限，无需认证。")

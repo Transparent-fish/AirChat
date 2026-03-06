@@ -51,57 +51,72 @@ func (h *Hub) run() {
 
 // 根据用户名断开在线用户连接
 func (h *Hub) disconnectByUsername(username string) {
+	var targets []*Client
 	h.mu.RLock()
-	defer h.mu.RUnlock()
 	for client := range h.clients {
 		if client.Username == username {
-			// 发送强制断开消息
-			select {
-			case client.send <- Message{
-				Type:    "force_disconnect",
-				Content: "您的账号已被管理员处理，连接已断开",
-			}:
-			default:
-			}
-			// 只发送退出信号，不直接关闭，由 goroutine 自行退出
-			go client.conn.Close()
+			targets = append(targets, client)
 		}
+	}
+	h.mu.RUnlock()
+
+	for _, client := range targets {
+		// 发送强制断开消息
+		select {
+		case client.send <- Message{
+			Type:    "force_disconnect",
+			Content: "您的账号已被管理员处理，连接已断开",
+		}:
+		default:
+		}
+		// 只发送退出信号，不直接关闭，由 goroutine 自行退出
+		go client.conn.Close()
 	}
 }
 
 // 根据IP断开在线用户连接
 func (h *Hub) disconnectByIP(ip string) {
+	var targets []*Client
 	h.mu.RLock()
-	defer h.mu.RUnlock()
 	for client := range h.clients {
 		if client.IP == ip {
-			// 发送强制断开消息
-			select {
-			case client.send <- Message{
-				Type:    "force_disconnect",
-				Content: "您的IP已被封禁，连接已断开",
-			}:
-			default:
-			}
-			go client.conn.Close()
+			targets = append(targets, client)
 		}
+	}
+	h.mu.RUnlock()
+
+	for _, client := range targets {
+		// 发送强制断开消息
+		select {
+		case client.send <- Message{
+			Type:    "force_disconnect",
+			Content: "您的IP已被封禁，连接已断开",
+		}:
+		default:
+		}
+		go client.conn.Close()
 	}
 }
 
 // 根据IP列表检查并断开被封IP的连接（用于范围封禁等场景）
 func (h *Hub) disconnectBannedIPs() {
+	var targets []*Client
 	h.mu.RLock()
-	defer h.mu.RUnlock()
 	for client := range h.clients {
 		if isIPBanned(client.IP) {
-			select {
-			case client.send <- Message{
-				Type:    "force_disconnect",
-				Content: "您的IP已被封禁，连接已断开",
-			}:
-			default:
-			}
-			go client.conn.Close()
+			targets = append(targets, client)
 		}
+	}
+	h.mu.RUnlock()
+
+	for _, client := range targets {
+		select {
+		case client.send <- Message{
+			Type:    "force_disconnect",
+			Content: "您的IP已被封禁，连接已断开",
+		}:
+		default:
+		}
+		go client.conn.Close()
 	}
 }
