@@ -685,14 +685,17 @@ func main() {
 			}
 
 			if info.IsDir() {
-				filepath.Walk(targetDir, func(path string, fInfo os.FileInfo, err error) error {
-					if err != nil || fInfo.IsDir() {
+				err := filepath.Walk(targetDir, func(path string, fInfo os.FileInfo, err error) error {
+					if err != nil {
+						return err
+					}
+					if fInfo.IsDir() {
 						return nil
 					}
 					// 保持相对于当前下载项的目录结构
 					relPath, err := filepath.Rel(targetDir, path)
 					if err != nil {
-						return nil
+						return err
 					}
 					// 在 zip 内放在以该文件夹命名的目录下
 					zipPath := filepath.Join(info.Name(), relPath)
@@ -712,20 +715,25 @@ func main() {
 						return err
 					}()
 				})
+				if err != nil {
+					log.Printf("Error walking directory for zip: %v", err)
+				}
 			} else {
-				// 单个文件
-				func() {
+				if err := func() error {
 					f, err := os.Open(targetDir)
 					if err != nil {
-						return
+						return err
 					}
 					defer f.Close()
 					w, err := zw.Create(info.Name())
 					if err != nil {
-						return
+						return err
 					}
-					io.Copy(w, f)
-				}()
+					_, err = io.Copy(w, f)
+					return err
+				}(); err != nil {
+					log.Printf("Error adding file to zip: %v", err)
+				}
 			}
 		}
 	})
